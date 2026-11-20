@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {SHIPS, PLANETS, SHIP_IDS} from './data.js';
-import {loadSave, persist, ownedShips} from './save.js';
+import {loadSave, persist, ownedShips, defaultHp} from './save.js';
 import {PRESETS, ORDER, resolve, detectAuto} from './quality.js';
 import {Engine} from './engine.js';
 import {Input} from './input.js';
@@ -8,12 +8,14 @@ import {Arena} from './arena.js';
 import {buildShip} from './ships3d.js';
 import * as World from './world.js';
 import {spawnBoss} from './boss.js';
+import {MODS, MOD_IDS, MOUNTS, SYNS, FAM, activeSyn} from './modules.js';
+import {RMETA, RAR, depthLabel, riftEnd} from './rift.js';
 
 const $ = id => document.getElementById(id);
 const save = loadSave(); persist(save);
-window.__nova = {spawnBoss, save, get mode() {return mode;}};
+window.__nova = {spawnBoss, save, ui: null, get mode() {return mode;}, launch: m => launch(m), refresh: () => refreshMenu()};
 
-let eng = null, arena = null, hangar = null, mode = 'menu', paused = false, last = performance.now(), clock = 0;
+let eng = null, arena = null, hangar = null, mode = 'menu', paused = false, last = performance.now(), clock = 0, lastMode = 'sortie', aSel = 'f';
 const input = new Input($('stage'));
 
 function webglOK() {try {const c = document.createElement('canvas'); return !!c.getContext('webgl2');} catch (e) {return false;}}
@@ -97,7 +99,7 @@ const ui = {
   hurt() {const e = $('hurt'); e.classList.add('on'); requestAnimationFrame(() => requestAnimationFrame(() => e.classList.remove('on')));},
   hud(h) {
     const b = $('hpb'); b.firstElementChild.style.transform = `scaleX(${Math.max(0, h.hp / h.max)})`; b.classList.toggle('low', h.hp / h.max < .3);
-    $('hs').textContent = h.score.toLocaleString(); $('hw').textContent = h.wave; $('hk').textContent = h.kills; $('hco').textContent = h.coins;
+    $('hs').textContent = h.score.toLocaleString(); $('hw').textContent = h.rl || h.wave; $('hwl').textContent = h.rl ? 'RIFT' : 'WAVE'; $('hk').textContent = h.kills; $('hco').textContent = h.coins;
     $('combo').textContent = h.combo > 2 ? 'COMBO ×' + h.combo : '';
     $('odb').firstElementChild.style.transform = `scaleX(${(h.gauge || 0) / 100})`; $('hg').textContent = h.graze || 0;
     const bb = $('bossb'); if (h.boss) {bb.classList.add('on'); $('bn').textContent = h.boss.name + ' · PHASE ' + h.boss.phase; $('bbar').firstElementChild.style.transform = `scaleX(${h.boss.hp})`; $('ba').textContent = h.boss.dying ? 'DESTROYED' : h.boss.armor > 0 ? 'ARMOR ×' + h.boss.armor + ' — BREAK TO EXPOSE CORE' : 'CORE EXPOSED';} else bb.classList.remove('on');
@@ -105,14 +107,36 @@ const ui = {
   },
   over(s) {
     save.coins += s.coins; save.stat.kills = (save.stat.kills || 0) + s.kills; save.g3.runs++;
-    save.g3.best[s.planet] = Math.max(save.g3.best[s.planet] || 0, s.score);
-    let conq = false;
-    if (s.bosses > 0 && !save.pclear[s.planet]) {save.pclear[s.planet] = true; save.punlock = Math.max(save.punlock || 1, s.planet + 2); if (!save.g3.conq.includes(s.planet)) save.g3.conq.push(s.planet); conq = true;}
-    persist(save);
-    $('ot').textContent = conq ? 'PLANET CONQUERED' : 'RUN COMPLETE';
-    $('og').innerHTML = `<span>SCORE</span><b>${s.score.toLocaleString()}</b><span>KILLS</span><b>${s.kills}</b><span>WAVE</span><b>${s.wave}</b><span>BOSS</span><b>${s.bosses}</b><span>GRAZE</span><b>${s.graze}</b><span>COINS</span><b>+${s.coins}</b><span>TIME</span><b>${Math.floor(s.time / 60)}:${String(Math.floor(s.time % 60)).padStart(2, '0')}</b>`;
-    document.body.classList.remove('od'); setBody('over');
-  }
+    const T = Math.floor(s.time / 60) + ':' + String(Math.floor(s.time % 60)).padStart(2, '0'), row = (k, v) => `<span>${k}</span><b>${v}</b>`;
+    if (s.rift) {
+      const c = riftEnd(save, s.rift); persist(save);
+      $('ot').textContent = s.rift.won ? 'RIFT CLEARED' : 'RIFT FAILED';
+      $('og').innerHTML = row('DEPTH', depthLabel(s.rift.won ? 30 : s.rift.depth)) + row('BEST', depthLabel(save.rift.best)) + row('CRYSTALS', '+' + c + ' ◆') + row('KILLS', s.kills) + row('BOSS', s.bosses) + row('COINS', '+' + s.coins) + row('TIME', T);
+    } else {
+      save.g3.best[s.planet] = Math.max(save.g3.best[s.planet] || 0, s.score);
+      let conq = false;
+      if (s.bosses > 0 && !save.pclear[s.planet]) {save.pclear[s.planet] = true; save.punlock = Math.max(save.punlock || 1, s.planet + 2); if (!save.g3.conq.includes(s.planet)) save.g3.conq.push(s.planet); conq = true;}
+      persist(save);
+      $('ot').textContent = conq ? 'PLANET CONQUERED' : 'RUN COMPLETE';
+      $('og').innerHTML = row('SCORE', s.score.toLocaleString()) + row('KILLS', s.kills) + row('WAVE', s.wave) + row('BOSS', s.bosses) + row('GRAZE', s.graze) + row('COINS', '+' + s.coins) + row('TIME', T);
+    }
+    document.body.classList.remove('od', 'picking'); setBody('over');
+  },
+  pick(s, cb) {
+    input.reset();
+    $('pt').textContent = s.title; $('ps').textContent = s.sub || '';
+    $('pbody').innerHTML = s.cards ? s.cards.map((c, i) => `<button class="pc r${c.rar}" data-i="${i}" style="--tc:${c.tc}"${s.disabled ? ' disabled' : ''}><span class="rar">${RAR[c.rar]}</span><b>${c.name}</b><small>${c.desc}</small><span class="tg">${c.tag} ${c.tn}${c.tnext ? '/' + c.tnext : ''}</span><span class="lv">${'●'.repeat(c.lvl)}${'○'.repeat(Math.max(0, c.max - c.lvl))}</span>${c.cost ? `<em>${c.cost}</em>` : ''}</button>`).join('')
+      : s.doors.map((d, i) => `<button class="pc door" data-i="${i}" style="--tc:${d.c}"><b>${d.name}</b><small>${d.desc}</small></button>`).join('');
+    $('pfoot').innerHTML = s.foot || '';
+    $('pbtn').innerHTML = (s.reroll > 0 ? `<button class="chip" data-a="re">สุ่มใหม่ ×${s.reroll}</button>` : '') + (s.skip ? `<button class="chip" data-a="skip">ข้าม ${s.skip}</button>` : '') + (s.leave ? `<button class="chip" data-a="leave">${s.leave}</button>` : '');
+    const el = $('pick'), t0 = performance.now();
+    el.onclick = e => {
+      const b = e.target.closest && e.target.closest('button'); if (!b || b.disabled || performance.now() - t0 < 380) return;
+      const r = b.dataset.a || +b.dataset.i; el.onclick = null; document.body.classList.remove('picking'); cb(r);
+    };
+    document.body.classList.add('picking');
+  },
+  pickHide() {document.body.classList.remove('picking');}
 };
 function setBody(m) {
   document.body.classList.remove('menu', 'play', 'over', 'paused'); document.body.classList.add(m); if (m === 'paused') document.body.classList.add('play');
@@ -131,26 +155,81 @@ function refreshMenu() {
   const m = save.g3.mig; $('mig').textContent = m ? `ย้ายเซฟ v${m.from} สำเร็จ · ยาน ${m.ships} · ดาวที่ยึด ${save.g3.conq.length}/${PLANETS.length} · ${m.kills.toLocaleString()} kills` : '';
   const p = PLANETS[save.g3.planet] || PLANETS[0]; $('pl').textContent = `${p.en}  ·  ${save.pclear[save.g3.planet] ? 'CONQUERED' : 'UNCONQUERED'}`;
   const c = save.g3.ctrl; $('crow').innerHTML = `<span>CAM</span>` + ['near', 'mid', 'far'].map(k => `<button class="chip ${(c.cam || 'mid') === k ? 'on' : ''}" data-c="${k}">${k.toUpperCase()}</button>`).join('') + `<button class="chip ${c.autoFire ? 'on' : ''}" data-c="af">AUTO-FIRE</button><button class="chip ${c.aimAssist ? 'on' : ''}" data-c="aa">AIM ASSIST</button>`;
+  $('bRift').textContent = save.g3.conq.length >= 3 ? 'RIFT · ' + save.rift.cry + ' ◆' : 'RIFT 🔒';
   const q = save.g3.q; $('qrow').innerHTML = ['auto', ...ORDER].map(k => `<button class="chip ${q === k ? 'on' : ''}" data-q="${k}">${k === 'auto' ? 'AUTO' : PRESETS[k].name}</button>`).join('');
 }
-function pickShip(d) {const l = owned(), i = l.indexOf(save.ship) + d; if (l[i]) {save.ship = l[i]; persist(save); hangar.setShip(save.ship); refreshMenu();}}
+/* ---------------- armory (hardpoint editor) ---------------- */
+function ask(name, cost, bal, yes) {
+  $('dN').textContent = name; $('dC').textContent = cost; $('dB').textContent = bal; const d = $('dlg'); d.classList.add('on');
+  $('dNo').onclick = () => d.classList.remove('on'); $('dYes').onclick = () => {d.classList.remove('on'); yes();};
+}
+function myHp() {return save.g3.hp[save.ship] || (save.g3.hp[save.ship] = defaultHp(save.ship));}
+function renderArmory() {
+  const D = SHIPS[save.ship], hp = myHp(), syn = activeSyn(hp);
+  $('aShip').textContent = D.name.toUpperCase() + ' · HARDPOINT LOADOUT'; $('aCoin').textContent = save.coins.toLocaleString() + ' ◈';
+  $('aSlots').innerHTML = MOUNTS.map(([k, n]) => `<button class="slot s-${k} ${aSel === k ? 'sel' : ''}" data-k="${k}"><small>${n}</small><b>${hp[k] ? MODS[hp[k]].n : '— ว่าง —'}</b></button>`).join('') + `<div class="slot s-s">${D.name}</div>`;
+  $('aMods').innerHTML = MOD_IDS.map(m => {
+    const M = MODS[m], own = (save.g3.mods[m] || 0) > 0, here = hp[aSel] === m;
+    return `<button class="mod ${own ? '' : 'lk'} ${here ? 'cur' : ''}" data-m="${m}" style="--fc:${FAM[M.fam].c}"><small>${FAM[M.fam].n}</small><b>${M.n}</b><span>${M.d}</span><em>${here ? '✓ ติดตั้งอยู่ในช่องนี้' : own ? 'แตะเพื่อติดตั้ง' : 'ซื้อ ' + M.price.toLocaleString() + ' ◈'}</em></button>`;
+  }).join('') + `<button class="mod clr" data-m="">ถอดโมดูลออกจากช่องนี้</button>`;
+  const twins = Object.values(syn).filter(s => s.id.startsWith('twin:')), recipes = SYNS.slice().sort((a, b) => (syn[b.id] ? 1 : 0) - (syn[a.id] ? 1 : 0));
+  $('aSyn').innerHTML = twins.map(s => `<div class="syn on" style="--fc:${s.c}"><b>${s.n}</b><span>${s.d}</span></div>`).join('')
+    + recipes.map(s => `<div class="syn ${syn[s.id] ? 'on' : ''}" style="--fc:${s.c}"><b>${MODS[s.a].n} + ${MODS[s.b].n}</b><i>→ ${s.n}</i><span>${s.d}</span></div>`).join('')
+    + `<div class="syn" style="--fc:#fff"><b>TWIN-LINK</b><span>ติดโมดูลเดียวกัน 2 ช่อง → ยิงเร็วขึ้น +25%</span></div>`;
+}
+function openArmory() {document.body.classList.add('armory'); renderArmory();}
+function closeArmory() {document.body.classList.remove('armory'); refreshMenu();}
+$('bArm').onclick = openArmory; $('aClose').onclick = closeArmory;
+$('aSlots').onclick = e => {const b = e.target.closest('.slot'); if (!b || !b.dataset.k) return; aSel = b.dataset.k; renderArmory();};
+$('aMods').onclick = e => {
+  const b = e.target.closest('.mod'); if (!b) return; const m = b.dataset.m, hp = myHp();
+  if (m === '') {if (!hp[aSel]) return; if (MOUNTS.filter(([k]) => hp[k]).length <= 1) {ui.toast('ต้องมีโมดูลอย่างน้อย 1 ช่อง'); return;} hp[aSel] = null; persist(save); renderArmory(); return;}
+  const M = MODS[m];
+  if (!(save.g3.mods[m] > 0)) {
+    if (save.coins < M.price) {ui.toast('เหรียญไม่พอ ต้องใช้ ' + M.price.toLocaleString() + ' ◈'); return;}
+    ask(M.n + ' · ' + M.d, M.price.toLocaleString() + ' ◈', 'คงเหลือหลังซื้อ ' + (save.coins - M.price).toLocaleString() + ' ◈', () => {if (save.coins < M.price) return; save.coins -= M.price; save.g3.mods[m] = 1; hp[aSel] = m; persist(save); renderArmory();});
+    return;
+  }
+  const before = Object.keys(activeSyn(hp)).length; hp[aSel] = m; persist(save); renderArmory();
+  const act = activeSyn(hp), nw = Object.values(act).filter(s => !s.id.startsWith('twin:'))[0]; if (Object.keys(act).length > before && nw) ui.toast('FUSION · ' + nw.n);
+};
+/* ---------------- rift menu ---------------- */
+function renderRift() {
+  const R = save.rift, M = R.meta, ok = save.g3.conq.length >= 3;
+  $('rCry').textContent = R.cry + ' ◆'; $('rInfo').textContent = `BEST ${R.best ? depthLabel(R.best) : '—'}  ·  RUNS ${R.runs}  ·  CLEARS ${R.clears}`;
+  $('rGo').disabled = !ok; $('rGo').textContent = ok ? 'ENTER RIFT' : `ยึดดาวให้ครบ 3 ดวง (${save.g3.conq.length}/3)`;
+  $('rMeta').innerHTML = Object.keys(RMETA).map(k => {
+    const m = RMETA[k], l = M[k], mx = l >= m.m, a = m.d(l), b = mx ? '' : m.d(l + 1);
+    return `<div class="rm"><div><b>${m.n}</b><small>${a}${b && b !== a ? ' → ' + b : ''}</small><i>${'●'.repeat(l)}${'○'.repeat(m.m - l)}</i></div><button class="chip" data-k="${k}" ${mx ? 'disabled' : ''}>${mx ? 'MAX' : m.c(l) + ' ◆'}</button></div>`;
+  }).join('');
+}
+$('bRift').onclick = () => {document.body.classList.add('riftm'); renderRift();};
+$('rClose').onclick = () => {document.body.classList.remove('riftm'); refreshMenu();};
+$('rMeta').onclick = e => {
+  const b = e.target.closest('button'); if (!b || b.disabled) return; const k = b.dataset.k, m = RMETA[k], R = save.rift, l = R.meta[k], cost = m.c(l);
+  if (R.cry < cost) {ui.toast('คริสตัลไม่พอ ต้องใช้ ' + cost + ' ◆'); return;}
+  ask(m.n + ' → LV' + (l + 1), cost + ' ◆', 'คริสตัลคงเหลือหลังซื้อ ' + (R.cry - cost) + ' ◆', () => {if (R.cry < cost) return; R.cry -= cost; R.meta[k]++; persist(save); renderRift();});
+};
+$('rGo').onclick = () => {document.body.classList.remove('riftm'); launch('rift');};
+function pickShip(d) {const l = owned(), i = l.indexOf(save.ship) + d; if (l[i]) {save.ship = l[i]; persist(save); hangar.setShip(save.ship); refreshMenu(); if (document.body.classList.contains('armory')) renderArmory();}}
 function pickPlanet(d) {const max = Math.min(PLANETS.length - 1, (save.punlock || 1) - 1); save.g3.planet = Math.max(0, Math.min(max, save.g3.planet + d)); persist(save); refreshMenu();}
 $('aPrev').onclick = () => pickShip(-1); $('aNext').onclick = () => pickShip(1);
 $('pPrev').onclick = () => pickPlanet(-1); $('pNext').onclick = () => pickPlanet(1);
 $('crow').onclick = e => {const k = e.target.dataset && e.target.dataset.c; if (!k) return; const c = save.g3.ctrl; if (k === 'af') c.autoFire = !c.autoFire; else if (k === 'aa') c.aimAssist = !c.aimAssist; else c.cam = k; persist(save); refreshMenu();};
 $('qrow').onclick = e => {const k = e.target.dataset && e.target.dataset.q; if (!k) return; save.g3.q = k; persist(save); toHangar(true);};
-function launch() {
+function launch(m = 'sortie') {
   if (hangar) {hangar.dispose(); hangar = null;}
-  eng.particles.points.visible = true; arena.start(save.g3.planet); setBody('play'); last = performance.now();
+  lastMode = m; document.body.classList.remove('armory', 'riftm', 'picking');
+  eng.particles.points.visible = true; arena.start(save.g3.planet, m); setBody('play'); last = performance.now();
 }
 function toHangar(rebuild) {
   if (rebuild || !eng) buildEngine(); else {if (arena.state !== 'idle') arena.stop(); if (hangar) hangar.dispose();}
   hangar = new Hangar(); setBody('menu'); refreshMenu();
 }
-$('go').onclick = launch; $('again').onclick = () => {arena.stop(); launch();};
+$('go').onclick = () => launch('sortie'); $('again').onclick = () => {arena.stop(); launch(lastMode);};
 $('toMenu').onclick = () => {arena.stop(); toHangar(false);};
 $('pauseB').onclick = () => setBody('paused'); $('resume').onclick = () => {setBody('play'); last = performance.now();};
-$('quit').onclick = () => {arena.stop(); toHangar(false);};
+$('quit').onclick = () => {if (arena.rift && arena.state !== 'over' && arena.state !== 'idle') {arena.state = 'over'; ui.over(arena.summary()); return;} arena.stop(); toHangar(false);};
 addEventListener('keydown', e => {if (e.code === 'Escape' && mode === 'play') setBody(paused ? 'play' : 'paused');});
 document.addEventListener('visibilitychange', () => {if (document.hidden && mode === 'play' && !paused) setBody('paused');});
 

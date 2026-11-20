@@ -68,6 +68,13 @@ export function defaultHp(id) {
 }
 function ensureHardpoints(save) {
   for (const id of save.owned) if (SHIPS[id] && !save.g3.hp[id]) save.g3.hp[id] = defaultHp(id);
+  for (const w of WEAPON_MODS) save.g3.mods[w] = Math.max(save.g3.mods[w] || 0, 1);   // base modules are always owned
+  // v25 Rift data (same shape as v25 so both versions can read it) + crates used by Rift clear rewards
+  save.rift = Object.assign({cry: 0, best: 0, runs: 0, clears: 0, meta: {}}, save.rift || {});
+  save.rift.meta = Object.assign({hp: 0, dmg: 0, reroll: 0, choice: 0, wlv: 0, cry: 0, heal: 0}, save.rift.meta || {});
+  save.crates = Object.assign({sup: 0, boss: 0, nova: 0}, save.crates || {});
+  // a mount may only hold a module that is owned
+  for (const id in save.g3.hp) for (const m of ['f', 'l', 'r', 'b']) {const w = save.g3.hp[id][m]; if (w && !save.g3.mods[w]) save.g3.hp[id][m] = m === 'f' ? 'blaster' : null;}
   if (!SHIPS[save.ship]) save.ship = 'nova';
 }
 

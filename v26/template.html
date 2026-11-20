@@ -71,6 +71,46 @@ body.menu #menu,body.over #over,body.paused #pause{display:flex}
 #over,#pause{align-items:center;justify-content:center;flex-direction:column;gap:14px;background:rgba(2,3,10,.72)}
 .rtitle{font-size:30px;font-weight:800;letter-spacing:.4em;text-shadow:0 0 20px var(--c)}
 .rgrid{display:grid;grid-template-columns:auto auto;gap:6px 26px;font-size:15px}.rgrid b{text-align:right;color:var(--gold)}
+#toast{z-index:30}body.picking #toast{opacity:0!important}
+body.armory #menu,body.riftm #menu{display:none!important}
+#armory,#rift{flex-direction:column;gap:10px;padding:calc(12px + var(--st)) calc(16px + var(--sr)) calc(12px + var(--sb)) calc(16px + var(--sl));background:rgba(2,3,10,.84);overflow-y:auto;touch-action:pan-y;z-index:6}
+body.armory #armory,body.riftm #rift{display:flex}
+.ahead{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.ahead .logo{font-size:17px}.abody{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}.acol{flex:1 1 300px;min-width:0}
+.slots{display:grid;grid-template-columns:repeat(3,1fr);grid-template-areas:". f ." "l s r" ". b .";gap:6px;max-width:340px;margin:6px auto 10px}
+.slot{pointer-events:auto;font:inherit;color:var(--w);border:1px solid rgba(86,224,255,.4);background:rgba(86,224,255,.07);padding:8px 4px;min-height:54px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;clip-path:polygon(8px 0,100% 0,calc(100% - 8px) 100%,0 100%)}
+.slot small{font-size:9px;letter-spacing:.2em;color:rgba(170,225,255,.75)}.slot b{font-size:12px}
+.slot.sel{background:rgba(255,210,74,.16);border-color:var(--gold);box-shadow:0 0 14px rgba(255,210,74,.4)}
+.s-f{grid-area:f}.s-l{grid-area:l}.s-r{grid-area:r}.s-b{grid-area:b}.slot.s-s{grid-area:s;border-style:dashed;font-size:10px;letter-spacing:.1em;text-align:center;opacity:.7;pointer-events:none}
+.mods{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-top:6px}
+.mod{pointer-events:auto;font:inherit;color:var(--w);text-align:left;border:1px solid var(--fc,rgba(86,224,255,.4));background:rgba(8,18,30,.7);padding:8px 10px;display:flex;flex-direction:column;gap:3px;box-shadow:inset 0 0 18px rgba(86,224,255,.05)}
+.mod small{font-size:9px;letter-spacing:.2em;color:var(--fc)}.mod b{font-size:14px}.mod span{font-size:11px;color:rgba(200,230,255,.78);line-height:1.35}.mod em{font-style:normal;font-size:11px;color:var(--ok);margin-top:2px}
+.mod.lk{opacity:.78}.mod.lk em{color:var(--gold)}.mod.cur{box-shadow:0 0 14px var(--fc);background:rgba(255,255,255,.07)}.mod.clr{border-style:dashed;align-items:center;justify-content:center;color:rgba(200,230,255,.7);font-size:11px}
+.syns{display:flex;flex-direction:column;gap:5px;margin-top:6px}
+.syn{border-left:3px solid var(--fc);padding:4px 8px;font-size:11px;background:rgba(8,18,30,.55);opacity:.45;line-height:1.35}
+.syn b{font-size:11px;letter-spacing:.05em}.syn i{font-style:normal;color:var(--fc);margin-left:6px;font-weight:700}.syn span{display:block;color:rgba(200,230,255,.8)}
+.syn.on{opacity:1;background:linear-gradient(90deg,rgba(255,255,255,.1),rgba(8,18,30,.5));box-shadow:0 0 12px var(--fc)}
+.dlg{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(2,3,10,.74);z-index:40;pointer-events:auto}
+.dlg.on{display:flex}.dbox{width:min(86vw,340px);padding:18px;border:1px solid var(--c);background:rgba(6,14,26,.96);text-align:center;display:flex;flex-direction:column;gap:8px;box-shadow:0 0 30px rgba(86,224,255,.3)}
+.dbox b{font-size:18px;letter-spacing:.08em}.dbox .gold{font-size:20px;color:var(--gold);font-weight:700}.dbox small{color:rgba(190,230,255,.8)}.dbox .row{margin-top:6px}
+.rm{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;border:1px solid rgba(180,140,255,.35);background:rgba(10,8,24,.6);margin-bottom:6px}
+.rm b{font-size:13px;display:block}.rm small{display:block;font-size:11px;color:rgba(210,190,255,.85)}.rm i{font-style:normal;font-size:10px;letter-spacing:.2em;color:var(--c2)}
+#rGo:disabled{opacity:.45;filter:grayscale(.6)}.rinfo{font-size:12px;letter-spacing:.14em;color:rgba(200,180,255,.9)}
+.rdesc{font-size:12px;color:rgba(200,230,255,.8);line-height:1.5;max-width:560px}
+body.picking .zone,body.picking .abtn{display:none!important}
+#pick{display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(2,3,10,.8);padding:calc(10px + var(--st)) 12px calc(10px + var(--sb));z-index:5}
+body.picking #pick{display:flex}
+.pt{font-size:clamp(16px,4.6vw,24px);font-weight:800;letter-spacing:.3em;text-shadow:0 0 18px var(--c);text-align:center}.ps{font-size:11px;letter-spacing:.2em;color:var(--c2);text-align:center}
+.pbody{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;max-width:100%}
+.pc{pointer-events:auto;font:inherit;color:var(--w);text-align:left;width:min(23vw,210px);min-width:150px;padding:10px 12px;display:flex;flex-direction:column;gap:4px;border:1.5px solid var(--tc,#56e0ff);background:linear-gradient(180deg,rgba(255,255,255,.07),rgba(6,12,22,.85));box-shadow:0 0 16px color-mix(in srgb,var(--tc,#56e0ff) 45%,transparent);animation:pin .35s both}
+.pc:nth-child(2){animation-delay:.06s}.pc:nth-child(3){animation-delay:.12s}.pc:nth-child(4){animation-delay:.18s}
+@keyframes pin{from{opacity:0;transform:translateY(16px) scale(.94)}to{opacity:1;transform:none}}
+.pc .rar{font-size:9px;letter-spacing:.24em;color:rgba(190,225,255,.7)}.pc.r2 .rar{color:#c08cff}.pc.r3 .rar{color:var(--gold)}.pc.r3{background:linear-gradient(180deg,rgba(255,210,74,.2),rgba(6,12,22,.85))}.pc.r2{background:linear-gradient(180deg,rgba(180,140,255,.16),rgba(6,12,22,.85))}
+.pc b{font-size:15px}.pc small{font-size:11px;color:rgba(210,235,255,.85);line-height:1.35;min-height:30px}.pc .tg{font-size:10px;letter-spacing:.14em;color:var(--tc)}.pc .lv{font-size:9px;letter-spacing:.2em;color:rgba(200,230,255,.6)}.pc em{font-style:normal;color:#ff7a8a;font-size:11px}
+.pc:disabled{opacity:.4}.pc.door{min-height:84px}
+.pfoot{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;font-size:10px;letter-spacing:.12em}.pfoot span{padding:2px 8px;border:1px solid rgba(190,225,255,.25);opacity:.55}.pfoot span.on{opacity:1;color:var(--tc,#fff);border-color:var(--tc,#fff);box-shadow:0 0 8px var(--tc,#fff)}.pfoot span.fu{--tc:#ffd24a}
+@media(orientation:portrait){.pbody{flex-direction:column;align-items:stretch;width:100%;max-width:440px}.pc{width:100%;min-height:74px;padding:8px 12px}.pc small{min-height:0}}
+@media(max-height:480px) and (orientation:landscape){.pc{padding:7px 9px}.pc b{font-size:13px}.pc small{font-size:10px;min-height:0}.pt{font-size:16px}#pick{gap:6px}}
 #fps{position:absolute;right:calc(8px + var(--sr));bottom:calc(4px + var(--sb));font-size:10px;color:rgba(160,225,255,.5);display:none;pointer-events:none}
 #err{position:absolute;inset:0;display:none;align-items:center;justify-content:center;padding:30px;text-align:center;background:#02030a}
 </style></head><body class="menu">
@@ -80,7 +120,7 @@ body.menu #menu,body.over #over,body.paused #pause{display:flex}
 <div id="stR" class="zone"><div class="base"><div class="knob"></div></div></div>
 <button class="abtn" id="btnDash">DASH</button><button class="abtn" id="btnBomb">BOMB</button>
 <div id="hud">
-  <div><div class="lbl">HULL</div><div class="bar" id="hpb"><i></i></div><div class="bar od" id="odb"><i></i></div><div class="lbl" style="margin-top:5px">WAVE <b id="hw">1</b> · KILL <b id="hk">0</b> · GRAZE <b id="hg">0</b></div></div>
+  <div><div class="lbl">HULL</div><div class="bar" id="hpb"><i></i></div><div class="bar od" id="odb"><i></i></div><div class="lbl" style="margin-top:5px"><span id="hwl">WAVE</span> <b id="hw">1</b> · KILL <b id="hk">0</b> · GRAZE <b id="hg">0</b></div></div>
   <div id="hc"><div class="lbl">SCORE</div><div class="big" id="hs">0</div><div id="combo"></div></div>
   <div id="hr"><div class="lbl">COINS</div><div class="big" id="hco" style="color:var(--gold);text-shadow:0 0 12px rgba(255,210,74,.6)">0</div><button id="pauseB">❚❚</button></div>
 </div>
@@ -93,12 +133,29 @@ body.menu #menu,body.over #over,body.paused #pause{display:flex}
   <div class="shipinfo"><div class="sname" id="sn"></div><div class="sperk" id="sp"></div><div class="stats" id="ss"></div><div class="hp" id="shp"></div></div>
   <div class="bot">
     <div class="row"><button class="chip" id="pPrev">◂</button><div class="pl" id="pl"></div><button class="chip" id="pNext">▸</button></div>
+    <div class="row"><button class="chip" id="bArm">ARMORY</button><button class="chip" id="bRift">RIFT</button></div>
     <div class="crow" id="crow"></div><div class="row" id="qrow"></div>
     <button class="go" id="go">LAUNCH</button>
   </div>
 </div>
+<div id="armory" class="ov">
+  <div class="ahead"><div class="logo">ARMORY<small id="aShip"></small></div><div class="coins" id="aCoin"></div><button class="chip" id="aClose">✕ CLOSE</button></div>
+  <div class="abody">
+    <div class="acol"><div class="lbl">HARDPOINTS · แตะช่อง แล้วเลือกโมดูล</div><div class="slots" id="aSlots"></div><div class="lbl">SYNERGY · ติดโมดูลคู่ให้ครบเพื่อปลดล็อกอาวุธหลอมรวม</div><div class="syns" id="aSyn"></div></div>
+    <div class="acol"><div class="lbl">MODULES</div><div class="mods" id="aMods"></div></div>
+  </div>
+</div>
+<div id="rift" class="ov">
+  <div class="ahead"><div class="logo">NOVA RIFT<small>ROGUELIKE · 3 SECTORS</small></div><div class="coins" id="rCry" style="color:var(--c2)"></div><button class="chip" id="rClose">✕ CLOSE</button></div>
+  <div class="rinfo" id="rInfo"></div>
+  <div class="rdesc">ฝ่า 3 เซกเตอร์ เซกเตอร์ละ 4 ห้อง + บอส เลือกประตูได้ทุกห้อง เก็บการ์ดพลังสุ่มผสมคอมโบ (ครบ 3/5 ใบในสายเดียวกันได้โบนัส · สองสายผสมกันได้อัลติเมตอัตโนมัติ) ตายแล้วเสียของในรอบ แต่คริสตัลเก็บไว้อัปเกรดถาวร</div>
+  <div class="row" style="justify-content:flex-start"><button class="go" id="rGo">ENTER RIFT</button></div>
+  <div class="lbl">PERMANENT UPGRADES</div><div id="rMeta"></div>
+</div>
+<div id="pick" class="ov"><div class="pt" id="pt"></div><div class="ps" id="ps"></div><div class="pbody" id="pbody"></div><div class="pfoot" id="pfoot"></div><div class="row" id="pbtn"></div></div>
 <div id="pause" class="ov"><div class="rtitle">PAUSED</div><button class="go" id="resume">RESUME</button><button class="chip" id="quit">ABORT RUN</button></div>
 <div id="over" class="ov"><div class="rtitle" id="ot">RUN COMPLETE</div><div class="rgrid" id="og"></div><button class="go" id="again">AGAIN</button><button class="chip" id="toMenu">HANGAR</button></div>
+<div id="dlg" class="dlg"><div class="dbox"><b id="dN"></b><div class="gold" id="dC"></div><small id="dB"></small><div class="row"><button class="chip" id="dNo">ยกเลิก</button><button class="chip on" id="dYes">ยืนยัน</button></div></div></div>
 <div id="fps"></div>
 <div id="err"><div>อุปกรณ์นี้ไม่รองรับ WebGL<br><small>Nova Strike v26 ต้องใช้ WebGL 2</small></div></div>
 </div>

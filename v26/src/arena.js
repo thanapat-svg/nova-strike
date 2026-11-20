@@ -4,7 +4,9 @@ import {SHIPS, PLANETS, BCOLS, FLAMES} from './data.js';
 import {buildShip} from './ships3d.js';
 import * as World from './world.js';
 import {spawnBoss, updateBoss, updateChunks, hitBoss, partPos, corePos, damagePart, damageCore} from './boss.js';
-import {initAst, fillAst, updateAst, blast} from './asteroids.js';
+import {initAst, fillAst, updateAst, blast, spawnAst} from './asteroids.js';
+import {MODS, MOUNT_OFF, shoot as modShoot, activeSyn, initModules, updateModules, arcStrike, openHole, bullet} from './modules.js';
+import {Build, RiftRun} from './rift.js';
 
 const TAU = Math.PI * 2, rnd = (a, b) => a + Math.random() * (b - a), clamp = THREE.MathUtils.clamp;
 const angDiff = (a, b) => {let d = (b - a) % TAU; if (d > Math.PI) d -= TAU; if (d < -Math.PI) d += TAU; return d;};
@@ -16,15 +18,6 @@ const ETYPES = {
   gunner: {hp: 6,  r: 2.0, spd: 11, col: 0xb46cff, score: 30, coins: 3, w: 3, dmg: 10},
   brute:  {hp: 18, r: 3.1, spd: 7.5, col: 0x4aff9a, score: 60, coins: 6, w: 5, dmg: 22}
 };
-const WEAPONS = { // rate (shots/s), dmg per shot, speed, life
-  blaster: {rate: 7, dmg: 1, spd: 78, life: 1.1},
-  spread:  {rate: 3.4, dmg: .75, spd: 66, life: .8},
-  laser:   {rate: 11, dmg: .55, spd: 120, life: .7},
-  missile: {rate: 2, dmg: 3.2, spd: 42, life: 2.2},
-  wave:    {rate: 1.4, dmg: 2.2, spd: 38, life: 1.1}
-};
-const MOUNT_OFF = {f: 0, r: Math.PI / 2, b: Math.PI, l: -Math.PI / 2};
-
 export class Arena {
   constructor(eng, save, input, ui) {
     this.eng = eng; this.q = eng.q; this.save = save; this.inp = input; this.ui = ui;
@@ -32,7 +25,9 @@ export class Arena {
   }
   add(o) {this.scene.add(o); this.objs.push(o); return o;}
 
-  start(planetIdx) {
+  start(planetIdx, mode = 'sortie') {
+    this.mode = mode; this.rift = null;
+    if (mode === 'rift') {this.rift = new RiftRun(this); planetIdx = this.rift.pl[0];}
     const q = this.q, save = this.save, D = this.D = SHIPS[save.ship] || SHIPS.nova, up = save.up || {};
     this.planet = PLANETS[planetIdx] || PLANETS[0]; this.pIdx = planetIdx;
     this.sky = this.add(World.makeSky(this.planet, q)); this.stars = this.add(World.makeStars(q.stars)); this.stars.material.uniforms.uPx.value = this.eng.dpr;
@@ -44,16 +39,19 @@ export class Arena {
     this.add(this.ship.group);
     if (q.shadow) this.ship.group.traverse(o => {if (o.isMesh) o.castShadow = true;});
     const P = this.P = {p: new THREE.Vector3(), v: new THREE.Vector3(), h: new THREE.Vector2(0, -1), yaw: 0, roll: 0, pitch: 0, inv: 0, dashT: 0, dashCd: 0, r: 1.7,
-      maxHp: D.hp + (up.hp || 0) * 20, hp: 0, bombs: (D.bombs || 0) + (up.bomb || 0), cd: {f: 0, l: 0, r: 0, b: 0}};
+      maxHp: D.hp + (up.hp || 0) * 20, hp: 0, bombs: (D.bombs || 0) + (up.bomb || 0), cd: {f: 0, l: 0, r: 0, b: 0}, shieldOn: false};
     P.hp = P.maxHp;
     this.maxSpeed = 24 * D.spd * (1 + .06 * (up.spd || 0));
     this.dmgMul = D.dmg * (1 + .1 * (up.dmg || 0)); this.rateMul = D.rate * (1 + .08 * (up.rate || 0));
-    this.crit = D.crit || 0; this.coinMul = 1 + .2 * (up.coin || 0); this.wlv = (D.startLv || 0) + (up.wlv || 0);
+    this.crit = D.crit || 0; this.coinMul = this.baseCoinMul = 1 + .2 * (up.coin || 0); this.wlv = (D.startLv || 0) + (up.wlv || 0);
     this.hpMounts = Object.assign({f: 'blaster', l: null, r: null, b: null}, (save.g3.hp && save.g3.hp[save.ship]) || {});
+    if (!['f', 'l', 'r', 'b'].some(k => this.hpMounts[k])) this.hpMounts.f = 'blaster';
+    this.syn = activeSyn(this.hpMounts); this.bld = new Build(this); this.meteors = [];
     // --- pools ---
     const bc = (BCOLS.find(b => b.id === save.bcol) || BCOLS[0]).c;
-    this.bCol = hexRGB(bc);
-    this.bm = this.add(new THREE.InstancedMesh(new THREE.BoxGeometry(.18, .18, 1.5), new THREE.MeshBasicMaterial({color: bc, toneMapped: false}), 320)); this.bm.frustumCulled = false; this.bm.count = 0;
+    this.bCol = hexRGB(bc); this.bColor = new THREE.Color(bc);
+    this.bm = this.add(new THREE.InstancedMesh(new THREE.BoxGeometry(.18, .18, 1.5), new THREE.MeshBasicMaterial({color: 0xffffff, toneMapped: false}), 320)); this.bm.frustumCulled = false; this.bm.count = 0; this.bm.setColorAt(0, this.bColor);
+    this.shieldM = this.add(new THREE.Mesh(new THREE.SphereGeometry(3, 18, 12), new THREE.MeshBasicMaterial({color: 0x5ad8ff, transparent: true, opacity: .2, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false}))); this.shieldM.visible = false; this.shieldM.renderOrder = 4;
     this.ebm = this.add(new THREE.InstancedMesh(new THREE.SphereGeometry(.5, 8, 6), new THREE.MeshBasicMaterial({color: 0xff5a3a, toneMapped: false}), 230)); this.ebm.frustumCulled = false; this.ebm.count = 0;
     this.dbm = this.add(new THREE.InstancedMesh(new THREE.TetrahedronGeometry(.55), q.pbr ? new THREE.MeshStandardMaterial({color: 0x8a8f99, metalness: .7, roughness: .4, emissive: 0x221108}) : new THREE.MeshLambertMaterial({color: 0x8a8f99}), 90)); this.dbm.frustumCulled = false; this.dbm.count = 0;
     this.rings = []; const rg = new THREE.RingGeometry(.88, 1, 48); rg.rotateX(-Math.PI / 2);
@@ -79,7 +77,10 @@ export class Arena {
     this.boss = null; this.chunks = []; this.nextBoss = 5; this.bossKills = 0; this._bossGeos = []; this._bossMats = []; this.tsHold = 0;
     this.gauge = 0; this.odT = 0; this.grazeN = 0; this.gIdle = 0; this.tsNow = 1; this.astT = 0;
     this._corePos = corePos; this._partPos = partPos; this._damagePart = (B, p, d) => damagePart(this, B, p, d); this._damageCore = (B, d) => damageCore(this, B, d);
-    initAst(this); fillAst(this, true); this.ui.toast && this.ui.toast('WAVE 1 · ' + this.planet.en);
+    initAst(this); fillAst(this, true); initModules(this, q);
+    const act = Object.values(this.syn).filter(s => !s.id.startsWith('twin:'));
+    if (this.rift) this.rift.begin();
+    else {this.ui.toast && this.ui.toast(act.length ? 'FUSION · ' + act.map(s => s.n).join(' + ') : 'WAVE 1 · ' + this.planet.en); if (act.length) {this.shockwave(0, 0); this.addShake(.3);}}
   }
 
   stop() {
@@ -92,6 +93,8 @@ export class Arena {
     this.objs = []; this.ship && this.ship.dispose();
     for (const k in this.eGeo || {}) this.eGeo[k].dispose();
     for (const k in this.eMat || {}) this.eMat[k].dispose();
+    for (const k in this.eMatE || {}) this.eMatE[k].dispose(); this.eMatE = null;
+    this.ui.pickHide && this.ui.pickHide();
   }
 
   /* ---------------- helpers ---------------- */
@@ -117,45 +120,37 @@ export class Arena {
   blast(x, z, R, f, d) {blast(this, x, z, R, f, d);}
 
   /* ---------------- weapons ---------------- */
-  shoot(ang, mod, mountScale) {
-    const W = WEAPONS[mod]; if (!W) return;
-    const P = this.P, lv = this.wlv, pt = this.eng.particles, ca = Math.cos(ang), sa = Math.sin(ang);
-    const dm = W.dmg * this.dmgMul * (1 + .22 * lv) * mountScale * (this.odT > 0 ? 1.5 : 1);
-    const mk = (a, o = {}) => {
-      if (this.B.length >= 300) return;
-      const spd = o.spd || W.spd; this.B.push({x: P.p.x + Math.cos(a) * 2.2 - Math.sin(a) * (o.off || 0), z: P.p.z + Math.sin(a) * 2.2 + Math.cos(a) * (o.off || 0), vx: Math.cos(a) * spd, vz: Math.sin(a) * spd, a, life: W.life, dmg: dm * (o.dm || 1), pierce: o.pierce || 0, hom: o.hom || 0, rad: o.rad || .9, kind: o.kind || 0, hit: new Set()});
-    };
-    if (mod === 'blaster') {const n = 1 + (lv >= 2 ? 1 : 0) + (lv >= 4 ? 1 : 0), sp = .55; for (let i = 0; i < n; i++) mk(ang, {off: (i - (n - 1) / 2) * sp * 2});}
-    else if (mod === 'spread') {const n = 3 + lv; for (let i = 0; i < n; i++) mk(ang + (i - (n - 1) / 2) * .17, {rad: .8});}
-    else if (mod === 'laser') {const n = lv >= 2 ? 2 : 1; for (let i = 0; i < n; i++) mk(ang, {pierce: 2 + lv, off: (i - (n - 1) / 2) * 1.4, rad: .7});}
-    else if (mod === 'missile') {const n = 1 + (lv >= 2 ? 1 : 0); for (let i = 0; i < n; i++) mk(ang + (i - (n - 1) / 2) * .35, {hom: 7, rad: 1.3, kind: 1, spd: W.spd});}
-    else if (mod === 'wave') {mk(ang, {pierce: 99, rad: 2.6, kind: 2, dm: 1});}
-    pt.burst(P.p.x + ca * 2.4, 0, P.p.z + sa * 2.4, 2, 10, .15, .9, this.bCol[0], this.bCol[1], this.bCol[2], 3);
-  }
+  shoot(ang, mod, mountScale) {modShoot(this, ang, mod, mountScale);}
 
   /* ---------------- enemies ---------------- */
-  spawnEnemy(type, bx, bz) {
-    const T = ETYPES[type], P = this.P;
+  eliteMat(type) {
+    this.eMatE = this.eMatE || {}; if (!this.eMatE[type]) this.eMatE[type] = this.q.pbr ? new THREE.MeshStandardMaterial({color: 0x2a2410, metalness: .8, roughness: .3, emissive: 0xffc83d, emissiveIntensity: .95}) : new THREE.MeshLambertMaterial({color: 0x2a2410, emissive: 0xffc83d});
+    return this.eMatE[type];
+  }
+  spawnEnemy(type, bx, bz, elite) {
+    const T = ETYPES[type], P = this.P, es = elite ? 1.3 : 1;
     const vr = this.vr; let a = rnd(0, TAU), x = P.p.x + Math.cos(a) * rnd(vr * 1.15, vr * 1.5), z = P.p.z + Math.sin(a) * rnd(vr * 1.15, vr * 1.5);
     const R = World.ARENA_R - 6, r = Math.hypot(x, z); if (r > R) {x *= R / r; z *= R / r;}
     if (bx !== undefined) {x = bx; z = bz;}
-    const mesh = new THREE.Mesh(this.eGeo[type], this.eMat[type]); mesh.scale.setScalar(T.r); mesh.position.set(x, 0, z);
+    const mesh = new THREE.Mesh(this.eGeo[type], elite ? this.eliteMat(type) : this.eMat[type]); mesh.scale.setScalar(T.r * es); mesh.position.set(x, 0, z);
     if (this.q.shadow) mesh.castShadow = true;
     this.scene.add(mesh);
-    const hp = T.hp * (1 + (this.wave - 1) * .14);
-    this.E.push({type, T, mesh, x, z, vx: 0, vz: 0, hp, maxHp: hp, r: T.r, t: rnd(0, 3), ph: rnd(0, TAU), orb: rnd(this.vr * .7, this.vr * .95), dir: Math.random() < .5 ? 1 : -1, st: 0, stT: rnd(2.2, 4.6), fireT: rnd(1, 2.4), dodge: Math.random() < .55, flash: 0, ldx: 0, ldz: 0, ang: a, kx: 0, kz: 0, gz: false});
+    const hp = T.hp * (1 + (this.wave - 1) * .14) * (elite ? 2.8 : 1);
+    this.E.push({type, T, mesh, x, z, vx: 0, vz: 0, hp, maxHp: hp, r: T.r * es, elite: !!elite, t: rnd(0, 3), ph: rnd(0, TAU), orb: rnd(this.vr * .7, this.vr * .95), dir: Math.random() < .5 ? 1 : -1, st: 0, stT: rnd(2.2, 4.6), fireT: rnd(1, 2.4), dodge: Math.random() < .55, flash: 0, ldx: 0, ldz: 0, ang: a, kx: 0, kz: 0, gz: false});
   }
   killEnemy(e, byDebris) {
     const T = e.T, i = this.E.indexOf(e); if (i < 0) return;
     this.E.splice(i, 1); this.scene.remove(e.mesh);
     this.kills++; this.combo++; this.comboT = 2.6;
-    this.score += Math.round(T.score * (1 + Math.min(this.combo, 40) * .05));
-    this.coins += T.coins * this.coinMul;
-    const big = e.type === 'brute';
-    this.explode(e.x, e.z, T.col, big ? 1.9 : e.type === 'gunner' ? 1.25 : 1);
+    this.score += Math.round(T.score * (e.elite ? 2.5 : 1) * (1 + Math.min(this.combo, 40) * .05));
+    this.coins += T.coins * (e.elite ? 3 : 1) * this.coinMul;
+    const big = e.type === 'brute' || e.elite, bl = this.bld;
+    this.explode(e.x, e.z, e.elite ? 0xffc83d : T.col, big ? 1.9 : e.type === 'gunner' ? 1.25 : 1);
     this.addShake(big ? .9 : .32); this.hitStop(big ? .1 : .04);
+    if (bl.vamp) this.P.hp = Math.min(this.P.maxHp, this.P.hp + (e.elite ? 2 : .4) * bl.vamp);
+    if (bl.chain && !this._inChain) {this._inChain = 1; this.ring(e.x, e.z, 8 + bl.chain * 2.5, 0xff9a3c, .4, .7); this.blast(e.x, e.z, 8 + bl.chain * 2.5, 12, 2.6 * bl.chain * this.dmgMul * bl.dmgNow()); this._inChain = 0;}
     const nw = 1 + Math.floor(this.kills / 12);
-    if (nw > this.wave) {this.wave = nw; this.ui.toast && this.ui.toast('WAVE ' + nw);}
+    if (!this.rift && nw > this.wave) {this.wave = nw; this.ui.toast && this.ui.toast('WAVE ' + nw);}
   }
   damageEnemy(e, d) {
     e.hp -= d; e.flash = .09;
@@ -163,13 +158,24 @@ export class Arena {
     if (e.hp <= 0) this.killEnemy(e);
   }
   hurt(d, fromX, fromZ) {
-    const P = this.P; if (P.inv > 0 || this.state !== 'play') return;
+    const P = this.P, bl = this.bld; if (P.inv > 0 || this.state !== 'play') return;
+    if (bl.ghost && Math.random() < bl.ghost) {P.inv = .45; this.ring(P.p.x, P.p.z, 10, 0x9fe0ff, .4, .6); this.eng.particles.burst(P.p.x, 0, P.p.z, 10, 14, .4, 1, .6, .9, 1, 2); return;}
+    if (P.shieldOn) {P.shieldOn = false; P.inv = 1; this.ring(P.p.x, P.p.z, 22, 0x5ad8ff, .5, .9); this.addShake(.3); this.blast(P.p.x, P.p.z, 20, 26, 0); this.ui.toast && this.ui.toast('SHIELD BREAK'); return;}
+    d *= bl.dr;
+    if (bl.mirror) for (let k = 0; k < 1 + bl.mirror; k++) {const e = this.nearest(P.p.x, P.p.z, this.vr * 1.3); if (e) bullet(this, P.p.x, P.p.z, Math.atan2(e.z - P.p.z, e.x - P.p.x) + rnd(-.3, .3), {spd: 60, life: 1.4, dmg: 3 * this.dmgMul * bl.dmgNow(), hom: 8, rad: 1.2, kind: 1, c: new THREE.Color('#9fe0ff'), sc: [1.6, 1.6, 1.4]});}
+    if (this.rift) this.rift.hit = true;
     P.hp -= d; P.inv = .85; this.fxH = 1; this.addShake(.55); this.hitStop(.07); this.combo = 0;
     const dx = P.p.x - fromX, dz = P.p.z - fromZ, m = Math.hypot(dx, dz) || 1; P.v.x += dx / m * 22; P.v.z += dz / m * 22;
     this.eng.particles.burst(P.p.x, 0, P.p.z, Math.round(18 * this.q.burst), 20, .5, 1.1, 1, .4, .3, 2);
     this.ui.hurt && this.ui.hurt();
     if (navigator.vibrate && this.save.set.vib !== false) navigator.vibrate(30);
-    if (P.hp <= 0) {P.hp = 0; this.die();}
+    if (P.hp <= 0) {
+      if (bl.phoenix && !this.phoenixUsed) {
+        this.phoenixUsed = true; P.hp = P.maxHp * .6; P.inv = 2.2; this.ring(P.p.x, P.p.z, 70, 0xffb347, .9, 1); this.shockwave(P.p.x, P.p.z); this.addShake(1); this.hitStop(.15); this.EB.length = 0;
+        this.blast(P.p.x, P.p.z, 55, 60, 10); this.ui.toast && this.ui.toast('PHOENIX REBORN'); return;
+      }
+      P.hp = 0; this.die();
+    }
   }
   die() {
     this.state = 'dying'; this.endT = 1.5; const P = this.P;
@@ -179,7 +185,7 @@ export class Arena {
 
   /* ---------------- main update ---------------- */
   update(dtReal) {
-    if (this.state === 'idle') return;
+    if (this.state === 'idle' || this.state === 'pick') return;
     let dt = Math.min(dtReal, .05);
     if (this.stopT > 0) {this.stopT -= dtReal; dt *= .04;}
     // time scale: overdrive bullet-time / boss-kill slow motion
@@ -187,7 +193,7 @@ export class Arena {
     dt *= this.tsNow;
     const dtp = this.tsNow < 1 ? dt / this.tsNow : dt;  // player + player bullets run at real speed during bullet-time
     this.t += dt;
-    const P = this.P, inp = this.inp, eng = this.eng, pt = eng.particles;
+    const P = this.P, inp = this.inp, eng = this.eng, pt = eng.particles, eSl = this.bld.time && P.hp < P.maxHp * .4 ? 1 - .16 * this.bld.time : 1;
 
     // screen position of player for mouse aim
     this.sp.copy(P.p).project(eng.cam); const sx = (this.sp.x * .5 + .5) * eng.W, sy = (-this.sp.y * .5 + .5) * eng.H;
@@ -227,9 +233,14 @@ export class Arena {
       else if (mm > .2) tgtAng = Math.atan2(mz, mx);
       const cur = Math.atan2(P.h.y, P.h.x), d = angDiff(cur, tgtAng), nang = cur + d * (1 - Math.exp(-14 * dtp));
       P.turn = angDiff(cur, nang) / Math.max(dtp, 1e-3); P.h.set(Math.cos(nang), Math.sin(nang));
-      if (firing) for (const m of ['f', 'l', 'r', 'b']) {
-        const mod = this.hpMounts[m]; if (!mod) continue; P.cd[m] -= dtp;
-        if (P.cd[m] <= 0) {P.cd[m] = 1 / (WEAPONS[mod].rate * this.rateMul * (m === 'f' ? 1 : .7) * (this.odT > 0 ? 1.6 : 1)); this.shoot(nang + MOUNT_OFF[m], mod, m === 'f' ? 1 : .6);}
+      if (firing) {
+        const bl = this.bld;
+        for (const m of ['f', 'l', 'r', 'b']) {
+          let mod = this.hpMounts[m], ms = m === 'f' ? 1 : .6;
+          if (m === 'b' && !mod && bl.rear) {mod = this.hpMounts.f || 'blaster'; ms = .45 + .15 * bl.rear;}
+          if (!mod) continue; P.cd[m] -= dtp;
+          if (P.cd[m] <= 0) {P.cd[m] = 1 / (MODS[mod].rate * this.rateMul * (m === 'f' ? 1 : .7) * (this.odT > 0 ? 1.6 : 1) * bl.rate * (this.syn['twin:' + mod] ? 1.25 : 1)); this.shoot(nang + MOUNT_OFF[m], mod, ms);}
+        }
       }
     } else {P.v.multiplyScalar(Math.exp(-3 * dtp)); P.p.x += P.v.x * dtp; P.p.z += P.v.z * dtp;}
 
@@ -246,7 +257,7 @@ export class Arena {
       const sp = Math.hypot(P.v.x, P.v.z) / this.maxSpeed, thr = clamp(sp, 0, 1.4);
       sh.setThrust(Math.min(1, thr), P.dashT > 0);
       if (this.rainbow) for (const f of sh.flames) f.m.color.setHSL((this.t * .6) % 1, 1, .6);
-      g.visible = this.state === 'play' && (P.inv <= 0 || (Math.floor(this.t * 20) & 1));
+      g.visible = (this.state === 'play' || (this.state === 'dying' && this.rift && this.rift.won)) && (P.inv <= 0 || (Math.floor(this.t * 20) & 1));
       if (this.state === 'play' && this.q.trail) { // exhaust particles scale with speed
         const nz = thr > .15 ? (this.q.burst >= 1 ? 2 : 1) : 0;
         for (const en of sh.engines) {
@@ -261,8 +272,8 @@ export class Arena {
     if (live) {
       this.spawnT -= dt;
       const cap = this.boss ? 6 : Math.min(14 + this.wave * 2, this.q.id === 'low' ? 22 : 38);
-      if (!this.boss && this.wave >= this.nextBoss) {const ks = ['mothership', 'dreadnought', 'warden', 'hive', 'reaper']; spawnBoss(this, PLANETS[this.pIdx] && ks.includes(PLANETS[this.pIdx].boss) && this.bossKills % 2 === 0 ? PLANETS[this.pIdx].boss : ks[(this.bossKills + this.pIdx) % ks.length]);}
-      if (this.spawnT <= 0 && this.E.length < cap) {
+      if (!this.rift && !this.boss && this.wave >= this.nextBoss) {const ks = ['mothership', 'dreadnought', 'warden', 'hive', 'reaper']; spawnBoss(this, PLANETS[this.pIdx] && ks.includes(PLANETS[this.pIdx].boss) && this.bossKills % 2 === 0 ? PLANETS[this.pIdx].boss : ks[(this.bossKills + this.pIdx) % ks.length]);}
+      if (!this.rift && this.spawnT <= 0 && this.E.length < cap) {
         const interval = Math.max(.3, 1.5 - this.t * .008 - this.wave * .04); this.spawnT = interval;
         const pool = []; for (const k in ETYPES) if (this.wave >= ETYPES[k].w) pool.push(k);
         const w = {drone: 6, dasher: 3, gunner: 2.4, brute: .9}; let tot = 0; for (const k of pool) tot += w[k];
@@ -271,6 +282,7 @@ export class Arena {
         for (let i = 0; i < grp; i++) this.spawnEnemy(pick);
       }
       this.comboT -= dt; if (this.comboT <= 0) this.combo = 0;
+      if (this.rift) this.rift.tick(dt);
     }
 
     /* --- enemy AI --- */
@@ -278,7 +290,7 @@ export class Arena {
     for (let i = E.length - 1; i >= 0; i--) {
       const e = E[i]; e.t += dt; e.flash -= dt;
       const dx = P.p.x - e.x, dz = P.p.z - e.z, d = Math.hypot(dx, dz) || 1, nx = dx / d, nz = dz / d;
-      let wx = 0, wz = 0, sp = e.T.spd, acc = 3;
+      let wx = 0, wz = 0, sp = e.T.spd * eSl, acc = 3;
       if (e.type === 'drone') {
         if (e.st === 0) { // flank: orbit on the player's side, tightening
           e.ang += e.dir * dt * .55; const R = Math.max(12, e.orb - e.t * 2.4);
@@ -333,6 +345,8 @@ export class Arena {
         if (Math.random() < dtp * 50) pt.spawn(b.x, 0, b.z, -b.vx * .1, 0, -b.vz * .1, .35, .9, 1, .7, .3, 1);
       }
       b.x += b.vx * dtp; b.z += b.vz * dtp;
+      if (b.pull) for (const e of E) {const dx = b.x - e.x, dz = b.z - e.z, d2 = dx * dx + dz * dz; if (d2 < 340 && d2 > 1) {const d = Math.sqrt(d2), f = 46 * (1 - d / 18.4) * dtp / Math.sqrt(e.r); e.kx += dx / d * f * 3; e.kz += dz / d * f * 3;}}
+      if (b.kind === 3 && Math.random() < dtp * 70) pt.spawn(b.x, 0, b.z, rnd(-4, 4), 0, rnd(-4, 4), .4, 1.7, .7, .45, 1, 1);
       let dead = b.life <= 0 || Math.hypot(b.x, b.z) > World.ARENA_R + 12;
       if (!dead && this.boss && hitBoss(this, b, b.dmg * (this.odT > 0 ? 1 : 1))) {
         if (b.kind === 1) {this.explode(b.x, b.z, 0xffa040, .7); this.blast(b.x, b.z, 8, 10, b.dmg * .7); dead = true;} else if (b.pierce > 0) b.pierce--; else dead = true;
@@ -342,18 +356,20 @@ export class Arena {
         const e = E[k]; if (b.hit.has(e)) continue;
         if ((e.x - b.x) ** 2 + (e.z - b.z) ** 2 < (e.r + b.rad) ** 2) {
           b.hit.add(e);
+          if (b.kind === 3) {dead = true; break;}
           if (b.kind === 1) {this.explode(b.x, b.z, 0xffa040, .7); this.damageEnemy(e, b.dmg); this.blast(b.x, b.z, 8, 12, b.dmg * .6); this.addShake(.25); dead = true; break;}
-          const crit = this.crit && Math.random() < this.crit; this.damageEnemy(e, b.dmg * (crit ? 2.5 : 1));
+          const cc = this.crit + this.bld.crit, crit = cc && Math.random() < cc; this.damageEnemy(e, b.dmg * (crit ? 2.5 + this.bld.cdm : 1));
+          if (b.arc && Math.random() < b.arc) arcStrike(this, e.x, e.z, 0, 4, 1, b.dmg * .7);
           if (b.pierce > 0) b.pierce--; else {dead = true; break;}
           if (b.kind === 2) {e.vx += b.vx * .25; e.vz += b.vz * .25;}
         }
       }
       if (!dead) for (const a of this.AS) if ((a.x - b.x) ** 2 + (a.z - b.z) ** 2 < (a.r + b.rad * .5) ** 2) {a.hp -= b.dmg; a.vx += b.vx * .02 / Math.sqrt(a.m) * 6; a.vz += b.vz * .02 / Math.sqrt(a.m) * 6; if (b.kind === 1) this.blast(b.x, b.z, 8, 12, b.dmg); if (b.pierce > 0 && b.kind !== 2) b.pierce--; else if (b.kind !== 2) dead = true; break;}
-      if (dead) {if (b.life > 0 && b.kind !== 1) pt.burst(b.x, 0, b.z, 2, 9, .2, .8, this.bCol[0], this.bCol[1], this.bCol[2], 3); this.B[i] = this.B[this.B.length - 1]; this.B.pop();}
+      if (dead) {if (b.kind === 3) openHole(this, b.x, b.z, false, !!this.syn.barrage); else if (b.life > 0 && b.kind !== 1) pt.burst(b.x, 0, b.z, 2, 9, .2, .8, this.bCol[0], this.bCol[1], this.bCol[2], 3); this.B[i] = this.B[this.B.length - 1]; this.B.pop();}
     }
     /* --- enemy bullets --- */
     for (let i = this.EB.length - 1; i >= 0; i--) {
-      const b = this.EB[i]; b.life -= dt; b.x += b.vx * dt; b.z += b.vz * dt;
+      const b = this.EB[i]; b.life -= dt * eSl; b.x += b.vx * dt * eSl; b.z += b.vz * dt * eSl;
       let dead = b.life <= 0 || Math.hypot(b.x, b.z) > World.ARENA_R + 20;
       const bd2 = (b.x - P.p.x) ** 2 + (b.z - P.p.z) ** 2, hr = b.r || 3.4;
       if (!dead && live) {if (bd2 < hr * hr) {if (P.inv <= 0) {this.hurt(b.s > 1 ? 14 : 9, b.x - b.vx, b.z - b.vz); dead = true;} } else if (!b.gz && bd2 < (hr + 3.4) ** 2) {b.gz = true; this.graze(b.x, b.z, 1);}}
@@ -371,14 +387,15 @@ export class Arena {
       }
       if (dead) {this.DB[i] = this.DB[this.DB.length - 1]; this.DB.pop();}
     }
-    updateAst(this, dt); updateBoss(this, dt); updateChunks(this, dt);
+    updateAst(this, dt); updateBoss(this, dt); updateChunks(this, dt); updateModules(this, dt);
+    this.shieldM.visible = P.shieldOn && this.state === 'play'; if (this.shieldM.visible) {this.shieldM.position.set(P.p.x, 0, P.p.z); this.shieldM.scale.setScalar(1 + Math.sin(this.t * 6) * .04);}
     this.updateOD(dtReal);
     /* --- rings --- */
     for (const r of this.rings) if (r.m.visible) {r.t += dt / r.life; if (r.t >= 1) {r.m.visible = false; continue;} r.m.scale.setScalar(r.R * (1 - (1 - r.t) ** 3)); r.m.material.opacity = (1 - r.t) * r.op;}
 
     /* --- instances --- */
     const o = this.tmp;
-    this.bm.count = this.B.length; this.B.forEach((b, i) => {o.position.set(b.x, 0, b.z); o.rotation.set(0, Math.atan2(-b.vx, -b.vz), 0); o.scale.set(b.kind === 2 ? 5 : b.kind === 1 ? 2.4 : 1, b.kind === 2 ? .3 : 1, b.kind === 2 ? .6 : 1); o.updateMatrix(); this.bm.setMatrixAt(i, o.matrix);}); this.bm.instanceMatrix.needsUpdate = true;
+    this.bm.count = this.B.length; this.B.forEach((b, i) => {o.position.set(b.x, 0, b.z); o.rotation.set(0, Math.atan2(-b.vx, -b.vz), 0); o.scale.set(b.sc[0], b.sc[1], b.sc[2]); o.updateMatrix(); this.bm.setMatrixAt(i, o.matrix); this.bm.setColorAt(i, b.c);}); this.bm.instanceMatrix.needsUpdate = true; this.bm.instanceColor.needsUpdate = true;
     this.ebm.count = this.EB.length; this.EB.forEach((b, i) => {o.position.set(b.x, 0, b.z); o.rotation.set(0, 0, 0); const s = (b.s || 1) * (1 + Math.sin(this.t * 20 + i) * .15); o.scale.setScalar(s); o.updateMatrix(); this.ebm.setMatrixAt(i, o.matrix);}); this.ebm.instanceMatrix.needsUpdate = true;
     this.dbm.count = this.DB.length; this.DB.forEach((s, i) => {o.position.set(s.x, s.y, s.z); o.rotation.set(s.rx, s.ry, 0); o.scale.setScalar(s.s); o.updateMatrix(); this.dbm.setMatrixAt(i, o.matrix);}); this.dbm.instanceMatrix.needsUpdate = true;
     if (this.blobs) {
@@ -418,13 +435,14 @@ export class Arena {
 
     /* --- state / HUD --- */
     if (this.state === 'dying') {this.endT -= dtReal; if (this.endT <= 0) {this.state = 'over'; this.inp.enabled = false; this.ui.over && this.ui.over(this.summary());}}
-    this.hudT -= dtReal; if (this.hudT <= 0) {this.hudT = .1; this.ui.hud && this.ui.hud({hp: P.hp, max: P.maxHp, score: this.score, kills: this.kills, coins: Math.floor(this.coins), wave: this.wave, combo: this.combo, dash: clamp(1 - P.dashCd / 1.6, 0, 1), bombs: P.bombs, gauge: this.gauge, od: this.odT > 0, graze: this.grazeN, boss: this.boss ? {name: this.boss.cfg.name, hp: Math.max(0, this.boss.hp / this.boss.max), armor: this.boss.parts.filter(p => p.alive && p.k === 'armor').length, phase: this.boss.phase, dying: this.boss.dying} : null});}
+    this.hudT -= dtReal; if (this.hudT <= 0) {this.hudT = .1; this.ui.hud && this.ui.hud({hp: P.hp, max: P.maxHp, score: this.score, kills: this.kills, coins: Math.floor(this.coins), wave: this.wave, rl: this.rift ? this.rift.hudLabel() : '', combo: this.combo, dash: clamp(1 - P.dashCd / 1.6, 0, 1), bombs: P.bombs, gauge: this.gauge, od: this.odT > 0, graze: this.grazeN, boss: this.boss ? {name: this.boss.cfg.name, hp: Math.max(0, this.boss.hp / this.boss.max), armor: this.boss.parts.filter(p => p.alive && p.k === 'armor').length, phase: this.boss.phase, dying: this.boss.dying} : null});}
   }
 
   graze(x, z, k) {
     if (this.state !== 'play') return;
     this.grazeN++; this.gIdle = 0; const P = this.P;
-    if (this.odT <= 0) this.gauge = Math.min(100, this.gauge + 6.5 * k * (P.dashT > 0 ? 2 : 1));
+    if (this.odT <= 0) this.gauge = Math.min(100, this.gauge + 6.5 * k * (P.dashT > 0 ? 2 : 1) * this.bld.odm);
+    if (this.bld.gzh && (this.gzT || 0) < this.t) {this.gzT = this.t + .3; P.hp = Math.min(P.maxHp, P.hp + this.bld.gzh);}
     this.eng.particles.burst((x + P.p.x) / 2, 0, (z + P.p.z) / 2, 6, 16, .3, .9, .4, 1, 1, 2.5);
     this.score += 2; if (navigator.vibrate && this.save.set.vib !== false && Math.random() < .3) navigator.vibrate(8);
   }
@@ -444,5 +462,13 @@ export class Arena {
     this.addShake(1); this.hitStop(.1); this.EB.length = 0;
     this.blast(P.p.x, P.p.z, 62, 40, 12);
   }
-  summary() {return {score: this.score, kills: this.kills, coins: Math.floor(this.coins), wave: this.wave, time: this.t, planet: this.pIdx, bosses: this.bossKills, graze: this.grazeN};}
+  spawnRock(x, z, r, vx, vz) {return spawnAst(this, x, z, r, vx, vz);}
+  retheme(pi) {
+    this.pIdx = pi; this.planet = PLANETS[pi] || PLANETS[0];
+    for (const k of ['sky', 'floor']) {const o = this[k], i = this.objs.indexOf(o); this.scene.remove(o); if (i >= 0) this.objs.splice(i, 1); o.geometry && o.geometry.dispose(); o.material && o.material.dispose();}
+    this.sky = this.add(World.makeSky(this.planet, this.q)); this.floor = this.add(World.makeFloor(this.planet));
+    this.ring(this.P.p.x, this.P.p.z, 90, 0xffffff, 1, .9); this.shockwave(this.P.p.x, this.P.p.z);
+  }
+  finish(win) {this.state = 'dying'; this.endT = win ? 1.4 : 1.5; this.inp.reset(); if (win) {this.ring(this.P.p.x, this.P.p.z, 100, 0xffd24a, 1.2, 1); this.shockwave(this.P.p.x, this.P.p.z); this.addShake(.6);}}
+  summary() {return {score: this.score, kills: this.kills, coins: Math.floor(this.coins), wave: this.wave, time: this.t, planet: this.pIdx, bosses: this.bossKills, graze: this.grazeN, mode: this.mode, rift: this.rift ? this.rift.summary() : null};}
 }
