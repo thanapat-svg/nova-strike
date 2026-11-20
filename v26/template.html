@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="th"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#02030a"><title>Nova Strike v26</title>
+<style>
+:root{--c:#56e0ff;--c2:#b48cff;--w:#e8f6ff;--bad:#ff5a6a;--ok:#5dff9a;--gold:#ffd24a;--st:env(safe-area-inset-top,0px);--sb:env(safe-area-inset-bottom,0px);--sl:env(safe-area-inset-left,0px);--sr:env(safe-area-inset-right,0px)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+html,body{margin:0;height:100%;background:#02030a;color:var(--w);font-family:"Segoe UI",system-ui,-apple-system,"Noto Sans Thai","Sarabun",sans-serif;overflow:hidden;touch-action:none}
+#stage{position:fixed;inset:0}#c{position:absolute;left:0;top:0;display:block}
+#sb{display:none}
+/* touch zones */
+.zone{position:absolute;bottom:0;top:22%;width:50%;touch-action:none;display:none}
+#stL{left:0}#stR{right:0}
+.base{position:absolute;width:112px;height:112px;margin:-56px 0 0 -56px;border-radius:50%;border:1.5px solid rgba(86,224,255,.55);background:radial-gradient(circle,rgba(86,224,255,.08),rgba(86,224,255,0) 70%);box-shadow:0 0 18px rgba(86,224,255,.25),inset 0 0 14px rgba(86,224,255,.15);opacity:.35;pointer-events:none;left:25%;top:78%}
+#stR .base{left:75%}
+.knob{position:absolute;left:50%;top:50%;width:46px;height:46px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff,var(--c));opacity:.85;transform:translate(-50%,-50%);box-shadow:0 0 14px var(--c)}
+body.play .zone{display:block}
+.abtn{position:absolute;display:none;width:62px;height:62px;border-radius:50%;border:1.5px solid rgba(86,224,255,.7);background:rgba(8,24,40,.35);color:var(--w);font-weight:700;font-size:11px;letter-spacing:.08em;box-shadow:0 0 16px rgba(86,224,255,.3);touch-action:none}
+body.play .abtn{display:block}
+#btnDash{right:calc(14px + var(--sr));bottom:calc(150px + var(--sb))}#btnBomb{right:calc(84px + var(--sr));bottom:calc(168px + var(--sb));border-color:rgba(255,210,74,.8);width:52px;height:52px}
+@media(max-height:520px){#btnDash{bottom:calc(120px + var(--sb))}#btnBomb{bottom:calc(138px + var(--sb))}}
+/* HUD (hologram, no boxes) */
+#hud{position:absolute;left:0;right:0;top:0;padding:calc(10px + var(--st)) calc(14px + var(--sr)) 0 calc(14px + var(--sl));display:none;pointer-events:none;justify-content:space-between;align-items:flex-start;gap:10px}
+body.play #hud{display:flex}
+.bar{width:min(42vw,220px);height:6px;background:rgba(86,224,255,.14);transform:skewX(-20deg);position:relative;overflow:hidden;box-shadow:0 0 10px rgba(86,224,255,.25)}
+.bar i{position:absolute;inset:0;width:100%;background:linear-gradient(90deg,var(--c),#9ff);box-shadow:0 0 10px var(--c);transform-origin:left;transition:transform .12s}
+.bar.low i{background:linear-gradient(90deg,var(--bad),#ffb0a0);box-shadow:0 0 10px var(--bad)}
+.lbl{font-size:10px;letter-spacing:.22em;color:rgba(160,225,255,.75);text-transform:uppercase}
+.big{font-size:26px;font-weight:700;letter-spacing:.04em;text-shadow:0 0 12px rgba(86,224,255,.7);font-variant-numeric:tabular-nums}
+#hc{text-align:center}#hr{text-align:right}
+#combo{font-size:13px;color:var(--gold);text-shadow:0 0 10px var(--gold);height:16px}
+#pauseB{pointer-events:auto;margin-top:6px;border:1px solid rgba(86,224,255,.5);background:none;color:var(--w);width:34px;height:34px;border-radius:50%;font-size:13px}
+#toast{position:absolute;left:0;right:0;top:26%;text-align:center;font-size:22px;letter-spacing:.35em;font-weight:700;color:var(--w);text-shadow:0 0 18px var(--c);opacity:0;transition:opacity .4s;pointer-events:none}
+#toast.on{opacity:1}
+#hurt{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle,transparent 55%,rgba(255,40,60,.55));opacity:0;transition:opacity .35s}
+#hurt.on{opacity:1;transition:none}
+/* overlays */
+.ov{position:absolute;inset:0;display:none;pointer-events:auto}
+body.menu #menu,body.over #over,body.paused #pause{display:flex}
+.panel{pointer-events:auto}
+#menu{flex-direction:column;justify-content:space-between;padding:calc(14px + var(--st)) calc(18px + var(--sr)) calc(14px + var(--sb)) calc(18px + var(--sl));background:linear-gradient(180deg,rgba(2,3,10,.55),rgba(2,3,10,0) 30%,rgba(2,3,10,0) 55%,rgba(2,3,10,.7))}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.logo{font-size:20px;font-weight:800;letter-spacing:.4em;text-shadow:0 0 16px var(--c)}.logo small{display:block;font-size:10px;letter-spacing:.35em;color:var(--c2);font-weight:500}
+.coins{font-size:18px;color:var(--gold);text-shadow:0 0 10px rgba(255,210,74,.6);font-weight:700}
+.mig{font-size:11px;color:rgba(160,255,200,.85);letter-spacing:.06em;margin-top:4px}
+.mid{display:flex;align-items:center;justify-content:center;gap:12px;flex:1}
+.arr{pointer-events:auto;background:none;border:none;color:var(--c);font-size:34px;width:48px;height:80px;text-shadow:0 0 12px var(--c)}
+.arr:disabled{opacity:.2}
+.shipinfo{text-align:center;pointer-events:none}
+.sname{font-size:24px;font-weight:800;letter-spacing:.3em;text-shadow:0 0 16px var(--c)}
+.sperk{font-size:12px;color:rgba(200,235,255,.8);margin:4px auto;max-width:78vw}
+.stats{display:flex;justify-content:center;gap:16px;font-size:11px;color:rgba(170,225,255,.9)}.stats b{color:var(--w)}
+.hp{display:flex;gap:6px;justify-content:center;margin-top:8px;font-size:10px;letter-spacing:.12em}
+.hp span{padding:3px 8px;border:1px solid rgba(86,224,255,.4);background:rgba(86,224,255,.07);clip-path:polygon(8px 0,100% 0,calc(100% - 8px) 100%,0 100%)}
+.hp span.em{opacity:.4}
+.bot{display:flex;flex-direction:column;gap:10px;align-items:center}
+@media(orientation:landscape){#menu{display:none}body.menu #menu{display:block}.mid{position:absolute;inset:0;pointer-events:none}.arr{pointer-events:auto}.shipinfo{position:absolute;left:calc(18px + var(--sl));bottom:calc(14px + var(--sb));text-align:left;width:min(40vw,380px)}.shipinfo .stats,.shipinfo .hp{justify-content:flex-start;flex-wrap:wrap}.sname{font-size:22px}.bot{position:absolute;right:calc(18px + var(--sr));bottom:calc(14px + var(--sb));align-items:flex-end}.arr{position:absolute;top:50%;margin-top:-40px}#aPrev{left:34%}#aNext{right:34%}.go{padding:12px 40px 12px 44px}}
+.row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;align-items:center}
+.chip{pointer-events:auto;font:inherit;font-size:11px;letter-spacing:.14em;color:var(--w);background:rgba(86,224,255,.07);border:1px solid rgba(86,224,255,.35);padding:7px 12px;clip-path:polygon(9px 0,100% 0,calc(100% - 9px) 100%,0 100%)}
+.chip.on{background:rgba(86,224,255,.28);border-color:var(--c);box-shadow:0 0 14px rgba(86,224,255,.5)}
+.go{pointer-events:auto;font:inherit;font-weight:800;font-size:17px;letter-spacing:.5em;padding:14px 46px 14px 52px;color:#02212b;background:linear-gradient(90deg,#56e0ff,#9ff6ff);border:none;clip-path:polygon(16px 0,100% 0,calc(100% - 16px) 100%,0 100%);box-shadow:0 0 30px rgba(86,224,255,.7)}
+.go:active{filter:brightness(1.3)}
+.pl{font-size:12px;letter-spacing:.2em;color:var(--c2);text-align:center}
+#over,#pause{align-items:center;justify-content:center;flex-direction:column;gap:14px;background:rgba(2,3,10,.72)}
+.rtitle{font-size:30px;font-weight:800;letter-spacing:.4em;text-shadow:0 0 20px var(--c)}
+.rgrid{display:grid;grid-template-columns:auto auto;gap:6px 26px;font-size:15px}.rgrid b{text-align:right;color:var(--gold)}
+#fps{position:absolute;right:calc(8px + var(--sr));bottom:calc(4px + var(--sb));font-size:10px;color:rgba(160,225,255,.5);display:none;pointer-events:none}
+#err{position:absolute;inset:0;display:none;align-items:center;justify-content:center;padding:30px;text-align:center;background:#02030a}
+</style></head><body class="menu">
+<div id="stage"><canvas id="c"></canvas>
+<div id="hurt"></div>
+<div id="stL" class="zone"><div class="base"><div class="knob"></div></div></div>
+<div id="stR" class="zone"><div class="base"><div class="knob"></div></div></div>
+<button class="abtn" id="btnDash">DASH</button><button class="abtn" id="btnBomb">BOMB</button>
+<div id="hud">
+  <div><div class="lbl">HULL</div><div class="bar" id="hpb"><i></i></div><div class="lbl" style="margin-top:6px">WAVE <b id="hw">1</b> · KILL <b id="hk">0</b></div></div>
+  <div id="hc"><div class="lbl">SCORE</div><div class="big" id="hs">0</div><div id="combo"></div></div>
+  <div id="hr"><div class="lbl">COINS</div><div class="big" id="hco" style="color:var(--gold);text-shadow:0 0 12px rgba(255,210,74,.6)">0</div><button id="pauseB">❚❚</button></div>
+</div>
+<div id="toast"></div>
+<div id="menu" class="ov">
+  <div class="top"><div><div class="logo">NOVA STRIKE<small>V26 · NEXT-GEN</small></div><div class="mig" id="mig"></div></div><div class="coins" id="mc">0</div></div>
+  <div class="mid"><button class="arr" id="aPrev">‹</button><div style="flex:1"></div><button class="arr" id="aNext">›</button></div>
+  <div class="shipinfo"><div class="sname" id="sn"></div><div class="sperk" id="sp"></div><div class="stats" id="ss"></div><div class="hp" id="shp"></div></div>
+  <div class="bot">
+    <div class="row"><button class="chip" id="pPrev">◂</button><div class="pl" id="pl"></div><button class="chip" id="pNext">▸</button></div>
+    <div class="row" id="qrow"></div>
+    <button class="go" id="go">LAUNCH</button>
+  </div>
+</div>
+<div id="pause" class="ov"><div class="rtitle">PAUSED</div><button class="go" id="resume">RESUME</button><button class="chip" id="quit">ABORT RUN</button></div>
+<div id="over" class="ov"><div class="rtitle" id="ot">RUN COMPLETE</div><div class="rgrid" id="og"></div><button class="go" id="again">AGAIN</button><button class="chip" id="toMenu">HANGAR</button></div>
+<div id="fps"></div>
+<div id="err"><div>อุปกรณ์นี้ไม่รองรับ WebGL<br><small>Nova Strike v26 ต้องใช้ WebGL 2</small></div></div>
+</div>
+<script>/*__JS__*/</script>
+</body></html>
