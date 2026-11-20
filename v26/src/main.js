@@ -7,10 +7,11 @@ import {Input} from './input.js';
 import {Arena} from './arena.js';
 import {buildShip} from './ships3d.js';
 import * as World from './world.js';
+import {spawnBoss} from './boss.js';
 
 const $ = id => document.getElementById(id);
 const save = loadSave(); persist(save);
-window.__nova = {save, get mode() {return mode;}};
+window.__nova = {spawnBoss, save, get mode() {return mode;}};
 
 let eng = null, arena = null, hangar = null, mode = 'menu', paused = false, last = performance.now(), clock = 0;
 const input = new Input($('stage'));
@@ -92,22 +93,25 @@ const rnd = (a, b) => a + Math.random() * (b - a);
 let toastT = 0;
 const ui = {
   toast(t) {const e = $('toast'); e.textContent = t; e.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => e.classList.remove('on'), 1400);},
+  od(on) {document.body.classList.toggle('od', !!on);},
   hurt() {const e = $('hurt'); e.classList.add('on'); requestAnimationFrame(() => requestAnimationFrame(() => e.classList.remove('on')));},
   hud(h) {
     const b = $('hpb'); b.firstElementChild.style.transform = `scaleX(${Math.max(0, h.hp / h.max)})`; b.classList.toggle('low', h.hp / h.max < .3);
     $('hs').textContent = h.score.toLocaleString(); $('hw').textContent = h.wave; $('hk').textContent = h.kills; $('hco').textContent = h.coins;
     $('combo').textContent = h.combo > 2 ? 'COMBO ×' + h.combo : '';
+    $('odb').firstElementChild.style.transform = `scaleX(${(h.gauge || 0) / 100})`; $('hg').textContent = h.graze || 0;
+    const bb = $('bossb'); if (h.boss) {bb.classList.add('on'); $('bn').textContent = h.boss.name + ' · PHASE ' + h.boss.phase; $('bbar').firstElementChild.style.transform = `scaleX(${h.boss.hp})`; $('ba').textContent = h.boss.dying ? 'DESTROYED' : h.boss.armor > 0 ? 'ARMOR ×' + h.boss.armor + ' — BREAK TO EXPOSE CORE' : 'CORE EXPOSED';} else bb.classList.remove('on');
     $('btnDash').style.opacity = h.dash >= 1 ? 1 : .45; $('btnBomb').textContent = 'BOMB ' + h.bombs; $('btnBomb').style.display = h.bombs > 0 ? '' : 'none';
   },
   over(s) {
     save.coins += s.coins; save.stat.kills = (save.stat.kills || 0) + s.kills; save.g3.runs++;
     save.g3.best[s.planet] = Math.max(save.g3.best[s.planet] || 0, s.score);
     let conq = false;
-    if (s.wave >= 6 && !save.pclear[s.planet]) {save.pclear[s.planet] = true; save.punlock = Math.max(save.punlock || 1, s.planet + 2); if (!save.g3.conq.includes(s.planet)) save.g3.conq.push(s.planet); conq = true;}
+    if (s.bosses > 0 && !save.pclear[s.planet]) {save.pclear[s.planet] = true; save.punlock = Math.max(save.punlock || 1, s.planet + 2); if (!save.g3.conq.includes(s.planet)) save.g3.conq.push(s.planet); conq = true;}
     persist(save);
     $('ot').textContent = conq ? 'PLANET CONQUERED' : 'RUN COMPLETE';
-    $('og').innerHTML = `<span>SCORE</span><b>${s.score.toLocaleString()}</b><span>KILLS</span><b>${s.kills}</b><span>WAVE</span><b>${s.wave}</b><span>COINS</span><b>+${s.coins}</b><span>TIME</span><b>${Math.floor(s.time / 60)}:${String(Math.floor(s.time % 60)).padStart(2, '0')}</b>`;
-    setBody('over');
+    $('og').innerHTML = `<span>SCORE</span><b>${s.score.toLocaleString()}</b><span>KILLS</span><b>${s.kills}</b><span>WAVE</span><b>${s.wave}</b><span>BOSS</span><b>${s.bosses}</b><span>GRAZE</span><b>${s.graze}</b><span>COINS</span><b>+${s.coins}</b><span>TIME</span><b>${Math.floor(s.time / 60)}:${String(Math.floor(s.time % 60)).padStart(2, '0')}</b>`;
+    document.body.classList.remove('od'); setBody('over');
   }
 };
 function setBody(m) {
@@ -126,12 +130,14 @@ function refreshMenu() {
   $('mc').textContent = save.coins.toLocaleString() + ' ◈';
   const m = save.g3.mig; $('mig').textContent = m ? `ย้ายเซฟ v${m.from} สำเร็จ · ยาน ${m.ships} · ดาวที่ยึด ${save.g3.conq.length}/${PLANETS.length} · ${m.kills.toLocaleString()} kills` : '';
   const p = PLANETS[save.g3.planet] || PLANETS[0]; $('pl').textContent = `${p.en}  ·  ${save.pclear[save.g3.planet] ? 'CONQUERED' : 'UNCONQUERED'}`;
+  const c = save.g3.ctrl; $('crow').innerHTML = `<span>CAM</span>` + ['near', 'mid', 'far'].map(k => `<button class="chip ${(c.cam || 'mid') === k ? 'on' : ''}" data-c="${k}">${k.toUpperCase()}</button>`).join('') + `<button class="chip ${c.autoFire ? 'on' : ''}" data-c="af">AUTO-FIRE</button><button class="chip ${c.aimAssist ? 'on' : ''}" data-c="aa">AIM ASSIST</button>`;
   const q = save.g3.q; $('qrow').innerHTML = ['auto', ...ORDER].map(k => `<button class="chip ${q === k ? 'on' : ''}" data-q="${k}">${k === 'auto' ? 'AUTO' : PRESETS[k].name}</button>`).join('');
 }
 function pickShip(d) {const l = owned(), i = l.indexOf(save.ship) + d; if (l[i]) {save.ship = l[i]; persist(save); hangar.setShip(save.ship); refreshMenu();}}
 function pickPlanet(d) {const max = Math.min(PLANETS.length - 1, (save.punlock || 1) - 1); save.g3.planet = Math.max(0, Math.min(max, save.g3.planet + d)); persist(save); refreshMenu();}
 $('aPrev').onclick = () => pickShip(-1); $('aNext').onclick = () => pickShip(1);
 $('pPrev').onclick = () => pickPlanet(-1); $('pNext').onclick = () => pickPlanet(1);
+$('crow').onclick = e => {const k = e.target.dataset && e.target.dataset.c; if (!k) return; const c = save.g3.ctrl; if (k === 'af') c.autoFire = !c.autoFire; else if (k === 'aa') c.aimAssist = !c.aimAssist; else c.cam = k; persist(save); refreshMenu();};
 $('qrow').onclick = e => {const k = e.target.dataset && e.target.dataset.q; if (!k) return; save.g3.q = k; persist(save); toHangar(true);};
 function launch() {
   if (hangar) {hangar.dispose(); hangar = null;}

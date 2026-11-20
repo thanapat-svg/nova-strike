@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import {SHIPS, PLANETS, BCOLS, FLAMES} from './data.js';
 import {buildShip} from './ships3d.js';
 import * as World from './world.js';
+import {spawnBoss, updateBoss, updateChunks, hitBoss, partPos, corePos, damagePart, damageCore} from './boss.js';
+import {initAst, fillAst, updateAst, blast} from './asteroids.js';
 
 const TAU = Math.PI * 2, rnd = (a, b) => a + Math.random() * (b - a), clamp = THREE.MathUtils.clamp;
 const angDiff = (a, b) => {let d = (b - a) % TAU; if (d > Math.PI) d -= TAU; if (d < -Math.PI) d += TAU; return d;};
@@ -52,7 +54,7 @@ export class Arena {
     const bc = (BCOLS.find(b => b.id === save.bcol) || BCOLS[0]).c;
     this.bCol = hexRGB(bc);
     this.bm = this.add(new THREE.InstancedMesh(new THREE.BoxGeometry(.18, .18, 1.5), new THREE.MeshBasicMaterial({color: bc, toneMapped: false}), 320)); this.bm.frustumCulled = false; this.bm.count = 0;
-    this.ebm = this.add(new THREE.InstancedMesh(new THREE.SphereGeometry(.5, 8, 6), new THREE.MeshBasicMaterial({color: 0xff5a3a, toneMapped: false}), 140)); this.ebm.frustumCulled = false; this.ebm.count = 0;
+    this.ebm = this.add(new THREE.InstancedMesh(new THREE.SphereGeometry(.5, 8, 6), new THREE.MeshBasicMaterial({color: 0xff5a3a, toneMapped: false}), 230)); this.ebm.frustumCulled = false; this.ebm.count = 0;
     this.dbm = this.add(new THREE.InstancedMesh(new THREE.TetrahedronGeometry(.55), q.pbr ? new THREE.MeshStandardMaterial({color: 0x8a8f99, metalness: .7, roughness: .4, emissive: 0x221108}) : new THREE.MeshLambertMaterial({color: 0x8a8f99}), 90)); this.dbm.frustumCulled = false; this.dbm.count = 0;
     this.rings = []; const rg = new THREE.RingGeometry(.88, 1, 48); rg.rotateX(-Math.PI / 2);
     for (let i = 0; i < 8; i++) {const m = new THREE.Mesh(rg, new THREE.MeshBasicMaterial({color: 0xffffff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false})); m.visible = false; m.renderOrder = 5; this.add(m); this.rings.push({m, t: 0, life: 1, R: 10});}
@@ -73,12 +75,20 @@ export class Arena {
     this.eng.cam.position.set(0, 40, 30); this.state = 'play';
     this.inp.reset(); this.inp.enabled = true;
     this.tmp = new THREE.Object3D(); this.sp = new THREE.Vector3();
-    this.vr = 30; this.waveToast = 1; this.ui.toast && this.ui.toast('WAVE 1 · ' + this.planet.en);
+    this.vr = 30; this.waveToast = 1;
+    this.boss = null; this.chunks = []; this.nextBoss = 5; this.bossKills = 0; this._bossGeos = []; this._bossMats = []; this.tsHold = 0;
+    this.gauge = 0; this.odT = 0; this.grazeN = 0; this.gIdle = 0; this.tsNow = 1; this.astT = 0;
+    this._corePos = corePos; this._partPos = partPos; this._damagePart = (B, p, d) => damagePart(this, B, p, d); this._damageCore = (B, d) => damageCore(this, B, d);
+    initAst(this); fillAst(this, true); this.ui.toast && this.ui.toast('WAVE 1 · ' + this.planet.en);
   }
 
   stop() {
     this.state = 'idle'; this.inp.enabled = false;
     for (const o of this.objs) {this.scene.remove(o); o.traverse && o.traverse(c => {c.geometry && c.geometry.dispose(); if (c.material) (Array.isArray(c.material) ? c.material : [c.material]).forEach(m => {m.map && m.map.dispose(); m.dispose();});});}
+    if (this.boss) {this.scene.remove(this.boss.group); this.boss.geos.forEach(g => g.dispose()); this.boss.mats.forEach(m => m.dispose()); this.boss = null;}
+    for (const c of this.chunks || []) this.scene.remove(c.mesh); this.chunks = [];
+    for (const e of this.E || []) this.scene.remove(e.mesh);
+    this._bossGeos.forEach(g => g.dispose()); this._bossMats.forEach(m => m.dispose()); this._bossGeos = []; this._bossMats = [];
     this.objs = []; this.ship && this.ship.dispose();
     for (const k in this.eGeo || {}) this.eGeo[k].dispose();
     for (const k in this.eMat || {}) this.eMat[k].dispose();
@@ -94,19 +104,20 @@ export class Arena {
     pt.burst(x, 0, z, n, 26 * power, .9, 1.6, r, g, b, 1.5);
     pt.burst(x, 0, z, Math.round(n * .45), 38 * power, .5, 1.0, 1, .95, .8, 2.2);
     pt.spawn(x, 0, z, 0, 0, 0, .28, 9 * power, 1, 1, .9, 0);
-    this.ring(x, z, 9 * power + 3, col, .55);
+    this.ring(x, z, 9 * power + 3, col, .55); blast(this, x, z, 9 * power + 5, 14 * power, 0);
     const nd = Math.min(q.debris * power | 0, 24);
     for (let i = 0; i < nd; i++) if (this.DB.length < 88) {const a = rnd(0, TAU), s = rnd(14, 34); this.DB.push({x, z, y: rnd(-1, 1), vx: Math.cos(a) * s, vz: Math.sin(a) * s, vy: rnd(-2, 6), rx: rnd(0, 6), ry: rnd(0, 6), sp: rnd(-9, 9), life: rnd(1.2, 2.4), s: rnd(.5, 1.2) * Math.sqrt(power)});}
   }
   hitStop(s) {this.stopT = Math.max(this.stopT, s);}
   addShake(s) {this.shake = Math.min(1.6, Math.max(this.shake, this.shake + s * .6, s));}
-  nearest(x, z, maxD = 1e9) {let best = null, bd = maxD * maxD; for (const e of this.E) {const d = (e.x - x) ** 2 + (e.z - z) ** 2; if (d < bd) {bd = d; best = e;}} return best;}
+  nearest(x, z, maxD = 1e9) {let best = null, bd = maxD * maxD; for (const e of this.E) {const d = (e.x - x) ** 2 + (e.z - z) ** 2; if (d < bd) {bd = d; best = e;}} const B = this.boss; if (B && !B.dying) {const [cx, cz] = corePos(B), d = (cx - x) ** 2 + (cz - z) ** 2; if (d < bd) best = {x: cx, z: cz, r: B.cfg.coreR, boss: true};} return best;}
+  blast(x, z, R, f, d) {blast(this, x, z, R, f, d);}
 
   /* ---------------- weapons ---------------- */
   shoot(ang, mod, mountScale) {
     const W = WEAPONS[mod]; if (!W) return;
     const P = this.P, lv = this.wlv, pt = this.eng.particles, ca = Math.cos(ang), sa = Math.sin(ang);
-    const dm = W.dmg * this.dmgMul * (1 + .22 * lv) * mountScale;
+    const dm = W.dmg * this.dmgMul * (1 + .22 * lv) * mountScale * (this.odT > 0 ? 1.5 : 1);
     const mk = (a, o = {}) => {
       if (this.B.length >= 300) return;
       const spd = o.spd || W.spd; this.B.push({x: P.p.x + Math.cos(a) * 2.2 - Math.sin(a) * (o.off || 0), z: P.p.z + Math.sin(a) * 2.2 + Math.cos(a) * (o.off || 0), vx: Math.cos(a) * spd, vz: Math.sin(a) * spd, a, life: W.life, dmg: dm * (o.dm || 1), pierce: o.pierce || 0, hom: o.hom || 0, rad: o.rad || .9, kind: o.kind || 0, hit: new Set()});
@@ -129,7 +140,7 @@ export class Arena {
     if (this.q.shadow) mesh.castShadow = true;
     this.scene.add(mesh);
     const hp = T.hp * (1 + (this.wave - 1) * .14);
-    this.E.push({type, T, mesh, x, z, vx: 0, vz: 0, hp, maxHp: hp, r: T.r, t: rnd(0, 3), ph: rnd(0, TAU), orb: rnd(this.vr * .7, this.vr * .95), dir: Math.random() < .5 ? 1 : -1, st: 0, stT: rnd(2.2, 4.6), fireT: rnd(1, 2.4), dodge: Math.random() < .55, flash: 0, ldx: 0, ldz: 0, ang: a});
+    this.E.push({type, T, mesh, x, z, vx: 0, vz: 0, hp, maxHp: hp, r: T.r, t: rnd(0, 3), ph: rnd(0, TAU), orb: rnd(this.vr * .7, this.vr * .95), dir: Math.random() < .5 ? 1 : -1, st: 0, stT: rnd(2.2, 4.6), fireT: rnd(1, 2.4), dodge: Math.random() < .55, flash: 0, ldx: 0, ldz: 0, ang: a, kx: 0, kz: 0, gz: false});
   }
   killEnemy(e, byDebris) {
     const T = e.T, i = this.E.indexOf(e); if (i < 0) return;
@@ -168,7 +179,10 @@ export class Arena {
     if (this.state === 'idle') return;
     let dt = Math.min(dtReal, .05);
     if (this.stopT > 0) {this.stopT -= dtReal; dt *= .04;}
-    dt *= this.ts;
+    // time scale: overdrive bullet-time / boss-kill slow motion
+    const want = this.tsHold > 0 ? .28 : this.odT > 0 ? .42 : 1; this.tsHold -= dtReal; this.tsNow += (want - this.tsNow) * (1 - Math.exp(-(want < this.tsNow ? 14 : 5) * dtReal));
+    dt *= this.tsNow;
+    const dtp = this.tsNow < 1 ? dt / this.tsNow : dt;  // player + player bullets run at real speed during bullet-time
     this.t += dt;
     const P = this.P, inp = this.inp, eng = this.eng, pt = eng.particles;
 
@@ -180,7 +194,7 @@ export class Arena {
     /* --- player movement --- */
     if (live) {
       const mx = inp.mv.x, mz = inp.mv.y, mm = Math.hypot(mx, mz);
-      P.inv -= dt; P.dashCd -= dt; P.dashT -= dt;
+      P.inv -= dtp; P.dashCd -= dtp; P.dashT -= dtp;
       if (inp.dashReq) {
         inp.dashReq = false;
         if (P.dashCd <= 0) {
@@ -192,10 +206,10 @@ export class Arena {
       }
       if (inp.bombReq) {inp.bombReq = false; if (P.bombs > 0) {P.bombs--; this.bomb();}}
       if (P.dashT <= 0) { // steer toward target velocity
-        const k = 1 - Math.exp(-(mm > .05 ? 7 : 4.5) * dt);
+        const k = 1 - Math.exp(-(mm > .05 ? 7 : 4.5) * dtp);
         P.v.x += (mx * this.maxSpeed - P.v.x) * k; P.v.z += (mz * this.maxSpeed - P.v.z) * k;
       }
-      P.p.x += P.v.x * dt; P.p.z += P.v.z * dt;
+      P.p.x += P.v.x * dtp; P.p.z += P.v.z * dtp;
       const r = Math.hypot(P.p.x, P.p.z), R = World.ARENA_R - 3;
       if (r > R) {const nx = P.p.x / r, nz = P.p.z / r; P.p.x = nx * R; P.p.z = nz * R; const vo = P.v.x * nx + P.v.z * nz; if (vo > 0) {P.v.x -= nx * vo * 1.4; P.v.z -= nz * vo * 1.4;}}
 
@@ -208,23 +222,23 @@ export class Arena {
         if (ctrl.aimAssist && nearE) {const ea = Math.atan2(nearE.z - P.p.z, nearE.x - P.p.x), d = angDiff(tgtAng, ea); if (Math.abs(d) < .2) tgtAng += d * .6;}
       } else if (ctrl.autoFire && nearE) {tgtAng = Math.atan2(nearE.z - P.p.z, nearE.x - P.p.x); firing = true;}
       else if (mm > .2) tgtAng = Math.atan2(mz, mx);
-      const cur = Math.atan2(P.h.y, P.h.x), d = angDiff(cur, tgtAng), nang = cur + d * (1 - Math.exp(-14 * dt));
-      P.turn = angDiff(cur, nang) / Math.max(dt, 1e-3); P.h.set(Math.cos(nang), Math.sin(nang));
+      const cur = Math.atan2(P.h.y, P.h.x), d = angDiff(cur, tgtAng), nang = cur + d * (1 - Math.exp(-14 * dtp));
+      P.turn = angDiff(cur, nang) / Math.max(dtp, 1e-3); P.h.set(Math.cos(nang), Math.sin(nang));
       if (firing) for (const m of ['f', 'l', 'r', 'b']) {
-        const mod = this.hpMounts[m]; if (!mod) continue; P.cd[m] -= dt;
-        if (P.cd[m] <= 0) {P.cd[m] = 1 / (WEAPONS[mod].rate * this.rateMul * (m === 'f' ? 1 : .7)); this.shoot(nang + MOUNT_OFF[m], mod, m === 'f' ? 1 : .6);}
+        const mod = this.hpMounts[m]; if (!mod) continue; P.cd[m] -= dtp;
+        if (P.cd[m] <= 0) {P.cd[m] = 1 / (WEAPONS[mod].rate * this.rateMul * (m === 'f' ? 1 : .7) * (this.odT > 0 ? 1.6 : 1)); this.shoot(nang + MOUNT_OFF[m], mod, m === 'f' ? 1 : .6);}
       }
-    } else {P.v.multiplyScalar(Math.exp(-3 * dt)); P.p.x += P.v.x * dt; P.p.z += P.v.z * dt;}
+    } else {P.v.multiplyScalar(Math.exp(-3 * dtp)); P.p.x += P.v.x * dtp; P.p.z += P.v.z * dtp;}
 
     /* --- ship visuals: heading, bank, pitch, exhaust --- */
     {
       const sh = this.ship, g = sh.group, ph = Math.atan2(-P.h.x, -P.h.y);  // model forward = -Z
       g.position.set(P.p.x, 0, P.p.z);
-      let dy = angDiff(g.rotation.y, ph); g.rotation.y += dy * (1 - Math.exp(-16 * dt));
+      let dy = angDiff(g.rotation.y, ph); g.rotation.y += dy * (1 - Math.exp(-16 * dtp));
       const fwd = -(P.v.x * Math.sin(g.rotation.y) + P.v.z * Math.cos(g.rotation.y)) * -1;
       const lat = P.v.x * Math.cos(g.rotation.y) - P.v.z * Math.sin(g.rotation.y);
       const tr = clamp(-lat * .028 + clamp(-(P.turn || 0) * .018, -.45, .45), -.85, .85), tp = clamp(-(P.v.x * -Math.sin(g.rotation.y) + P.v.z * -Math.cos(g.rotation.y)) * .006, -.25, .25);
-      P.roll += (tr - P.roll) * (1 - Math.exp(-9 * dt)); P.pitch += (tp - P.pitch) * (1 - Math.exp(-7 * dt));
+      P.roll += (tr - P.roll) * (1 - Math.exp(-9 * dtp)); P.pitch += (tp - P.pitch) * (1 - Math.exp(-7 * dtp));
       sh.body.rotation.z = P.roll; sh.body.rotation.x = P.pitch + Math.sin(this.t * 2.2) * .012; sh.body.position.y = Math.sin(this.t * 1.7) * .12;
       const sp = Math.hypot(P.v.x, P.v.z) / this.maxSpeed, thr = clamp(sp, 0, 1.4);
       sh.setThrust(Math.min(1, thr), P.dashT > 0);
@@ -242,7 +256,8 @@ export class Arena {
     /* --- spawning --- */
     if (live) {
       this.spawnT -= dt;
-      const cap = Math.min(14 + this.wave * 2, this.q.id === 'low' ? 22 : 38);
+      const cap = this.boss ? 6 : Math.min(14 + this.wave * 2, this.q.id === 'low' ? 22 : 38);
+      if (!this.boss && this.wave >= this.nextBoss) {const ks = ['mothership', 'dreadnought', 'warden', 'hive', 'reaper']; spawnBoss(this, PLANETS[this.pIdx] && ks.includes(PLANETS[this.pIdx].boss) && this.bossKills % 2 === 0 ? PLANETS[this.pIdx].boss : ks[(this.bossKills + this.pIdx) % ks.length]);}
       if (this.spawnT <= 0 && this.E.length < cap) {
         const interval = Math.max(.3, 1.5 - this.t * .008 - this.wave * .04); this.spawnT = interval;
         const pool = []; for (const k in ETYPES) if (this.wave >= ETYPES[k].w) pool.push(k);
@@ -267,7 +282,7 @@ export class Arena {
           wx = ex / em; wz = ez / em; if (e.t > e.stT && live) {e.st = 1; e.t = 0;}
         } else {wx = nx; wz = nz; sp *= 2.5; acc = 6; if (e.t > .9) {e.st = 0; e.t = 0; e.stT = rnd(2.5, 5); e.ang = Math.atan2(e.z - P.p.z, e.x - P.p.x);}}
       } else if (e.type === 'dasher') {
-        if (e.st === 0) {const tx = P.p.x + Math.cos(e.ang) * this.vr * .75, tz = P.p.z + Math.sin(e.ang) * this.vr * .75, ex = tx - e.x, ez = tz - e.z, em = Math.hypot(ex, ez) || 1; wx = ex / em; wz = ez / em; e.ang += e.dir * dt * .3; if (e.t > e.stT && live) {e.st = 1; e.t = 0; e.ldx = nx; e.ldz = nz;}}
+        if (e.st === 0) {e.gz = false; const tx = P.p.x + Math.cos(e.ang) * this.vr * .75, tz = P.p.z + Math.sin(e.ang) * this.vr * .75, ex = tx - e.x, ez = tz - e.z, em = Math.hypot(ex, ez) || 1; wx = ex / em; wz = ez / em; e.ang += e.dir * dt * .3; if (e.t > e.stT && live) {e.st = 1; e.t = 0; e.ldx = nx; e.ldz = nz;}}
         else if (e.st === 1) {wx = 0; wz = 0; acc = 9; e.ldx = nx; e.ldz = nz; e.mesh.material === this.eMat.dasher; if (e.t > .75) {e.st = 2; e.t = 0;} else if (Math.random() < dt * 40) pt.spawn(e.x, 0, e.z, e.ldx * 8, 0, e.ldz * 8, .25, 1.4, 1, .6, .2, 2);}
         else if (e.st === 2) {e.vx = e.ldx * 56; e.vz = e.ldz * 56; wx = e.ldx; wz = e.ldz; sp = 56; acc = 30; if (e.t > .5) {e.st = 3; e.t = 0;}}
         else {wx = 0; wz = 0; acc = 2.5; if (e.t > .9) {e.st = 0; e.t = 0; e.stT = rnd(2, 4);}}
@@ -291,7 +306,7 @@ export class Arena {
       for (let k = 1; k <= 5; k++) {const o = E[(i + k) % E.length]; if (o === e) break; const sx = e.x - o.x, sz = e.z - o.z, sd = Math.hypot(sx, sz); const md = e.r + o.r + 1.2; if (sd < md && sd > .01) {const f = (md - sd) / md; wx += sx / sd * f * 2.2; wz += sz / sd * f * 2.2;}}
       const wm = Math.hypot(wx, wz); if (wm > 1) {wx /= wm; wz /= wm;}
       const kk = 1 - Math.exp(-acc * dt); e.vx += (wx * sp - e.vx) * kk; e.vz += (wz * sp - e.vz) * kk;
-      e.x += e.vx * dt; e.z += e.vz * dt;
+      e.x += (e.vx + e.kx) * dt; e.z += (e.vz + e.kz) * dt; const kd = Math.exp(-2.6 * dt); e.kx *= kd; e.kz *= kd;
       const er = Math.hypot(e.x, e.z), ER = World.ARENA_R + 8; if (er > ER) {e.x *= ER / er; e.z *= ER / er;}
       // visuals
       const m = e.mesh; m.position.set(e.x, Math.sin(e.t * 3 + e.ph) * .3, e.z);
@@ -300,6 +315,7 @@ export class Arena {
       if (e.type === 'drone') m.rotation.x += dt * 1.5;
       const pul = e.flash > 0 ? 1.25 : (e.type === 'dasher' && e.st === 1 ? 1 + Math.sin(e.t * 40) * .15 : 1);
       m.scale.setScalar(e.r * pul);
+      if (e.type === 'dasher' && e.st === 2 && !e.gz && live && d < e.r + P.r + 5 && d > e.r + P.r) {e.gz = true; this.graze(e.x, e.z, 1.6);}
       // contact damage
       if (live && d < e.r + P.r) {this.hurt(e.type === 'dasher' && e.st === 2 ? e.T.dmg : e.T.dmg * .7, e.x, e.z); e.vx -= nx * 18; e.vz -= nz * 18; if (e.type !== 'brute' && P.dashT <= 0) this.damageEnemy(e, 1.5);}
       else if (live && P.dashT > 0 && d < e.r + P.r + 1.2) {this.damageEnemy(e, 2); e.vx -= nx * 30; e.vz -= nz * 30;}
@@ -307,30 +323,36 @@ export class Arena {
 
     /* --- player bullets --- */
     for (let i = this.B.length - 1; i >= 0; i--) {
-      const b = this.B[i]; b.life -= dt;
+      const b = this.B[i]; b.life -= dtp;
       if (b.hom) { // homing missile
-        const e = this.nearest(b.x, b.z, 55); if (e) {const want = Math.atan2(e.z - b.z, e.x - b.x), d = angDiff(b.a, want); b.a += clamp(d, -b.hom * dt, b.hom * dt); const s = Math.hypot(b.vx, b.vz) + 40 * dt; b.vx = Math.cos(b.a) * s; b.vz = Math.sin(b.a) * s;}
-        if (Math.random() < dt * 50) pt.spawn(b.x, 0, b.z, -b.vx * .1, 0, -b.vz * .1, .35, .9, 1, .7, .3, 1);
+        const e = this.nearest(b.x, b.z, 55); if (e) {const want = Math.atan2(e.z - b.z, e.x - b.x), d = angDiff(b.a, want); b.a += clamp(d, -b.hom * dtp, b.hom * dtp); const s = Math.hypot(b.vx, b.vz) + 40 * dtp; b.vx = Math.cos(b.a) * s; b.vz = Math.sin(b.a) * s;}
+        if (Math.random() < dtp * 50) pt.spawn(b.x, 0, b.z, -b.vx * .1, 0, -b.vz * .1, .35, .9, 1, .7, .3, 1);
       }
-      b.x += b.vx * dt; b.z += b.vz * dt;
+      b.x += b.vx * dtp; b.z += b.vz * dtp;
       let dead = b.life <= 0 || Math.hypot(b.x, b.z) > World.ARENA_R + 12;
+      if (!dead && this.boss && hitBoss(this, b, b.dmg * (this.odT > 0 ? 1 : 1))) {
+        if (b.kind === 1) {this.explode(b.x, b.z, 0xffa040, .7); this.blast(b.x, b.z, 8, 10, b.dmg * .7); dead = true;} else if (b.pierce > 0) b.pierce--; else dead = true;
+        pt.burst(b.x, 0, b.z, 2, 10, .2, .8, 1, .9, .6, 3);
+      }
       if (!dead) for (let k = E.length - 1; k >= 0; k--) {
         const e = E[k]; if (b.hit.has(e)) continue;
         if ((e.x - b.x) ** 2 + (e.z - b.z) ** 2 < (e.r + b.rad) ** 2) {
           b.hit.add(e);
-          if (b.kind === 1) {this.explode(b.x, b.z, 0xffa040, .7); for (const o of E.slice()) if ((o.x - b.x) ** 2 + (o.z - b.z) ** 2 < 64) this.damageEnemy(o, b.dmg * (o === e ? 1 : .6)); this.addShake(.25); dead = true; break;}
+          if (b.kind === 1) {this.explode(b.x, b.z, 0xffa040, .7); this.damageEnemy(e, b.dmg); this.blast(b.x, b.z, 8, 12, b.dmg * .6); this.addShake(.25); dead = true; break;}
           const crit = this.crit && Math.random() < this.crit; this.damageEnemy(e, b.dmg * (crit ? 2.5 : 1));
           if (b.pierce > 0) b.pierce--; else {dead = true; break;}
           if (b.kind === 2) {e.vx += b.vx * .25; e.vz += b.vz * .25;}
         }
       }
+      if (!dead) for (const a of this.AS) if ((a.x - b.x) ** 2 + (a.z - b.z) ** 2 < (a.r + b.rad * .5) ** 2) {a.hp -= b.dmg; a.vx += b.vx * .02 / Math.sqrt(a.m) * 6; a.vz += b.vz * .02 / Math.sqrt(a.m) * 6; if (b.kind === 1) this.blast(b.x, b.z, 8, 12, b.dmg); if (b.pierce > 0 && b.kind !== 2) b.pierce--; else if (b.kind !== 2) dead = true; break;}
       if (dead) {if (b.life > 0 && b.kind !== 1) pt.burst(b.x, 0, b.z, 2, 9, .2, .8, this.bCol[0], this.bCol[1], this.bCol[2], 3); this.B[i] = this.B[this.B.length - 1]; this.B.pop();}
     }
     /* --- enemy bullets --- */
     for (let i = this.EB.length - 1; i >= 0; i--) {
       const b = this.EB[i]; b.life -= dt; b.x += b.vx * dt; b.z += b.vz * dt;
       let dead = b.life <= 0 || Math.hypot(b.x, b.z) > World.ARENA_R + 20;
-      if (!dead && live && (b.x - P.p.x) ** 2 + (b.z - P.p.z) ** 2 < 3.4 * 3.4) {this.hurt(9, b.x - b.vx, b.z - b.vz); dead = true;}
+      const bd2 = (b.x - P.p.x) ** 2 + (b.z - P.p.z) ** 2, hr = b.r || 3.4;
+      if (!dead && live) {if (bd2 < hr * hr) {if (P.inv <= 0) {this.hurt(b.s > 1 ? 14 : 9, b.x - b.vx, b.z - b.vz); dead = true;} } else if (!b.gz && bd2 < (hr + 3.4) ** 2) {b.gz = true; this.graze(b.x, b.z, 1);}}
       if (Math.random() < dt * 30) pt.spawn(b.x, 0, b.z, 0, 0, 0, .3, .8, 1, .3, .2, 0);
       if (dead) {this.EB[i] = this.EB[this.EB.length - 1]; this.EB.pop();}
     }
@@ -345,13 +367,15 @@ export class Arena {
       }
       if (dead) {this.DB[i] = this.DB[this.DB.length - 1]; this.DB.pop();}
     }
+    updateAst(this, dt); updateBoss(this, dt); updateChunks(this, dt);
+    this.updateOD(dtReal);
     /* --- rings --- */
     for (const r of this.rings) if (r.m.visible) {r.t += dt / r.life; if (r.t >= 1) {r.m.visible = false; continue;} r.m.scale.setScalar(r.R * (1 - (1 - r.t) ** 3)); r.m.material.opacity = (1 - r.t) * r.op;}
 
     /* --- instances --- */
     const o = this.tmp;
     this.bm.count = this.B.length; this.B.forEach((b, i) => {o.position.set(b.x, 0, b.z); o.rotation.set(0, Math.atan2(-b.vx, -b.vz), 0); o.scale.set(b.kind === 2 ? 5 : b.kind === 1 ? 2.4 : 1, b.kind === 2 ? .3 : 1, b.kind === 2 ? .6 : 1); o.updateMatrix(); this.bm.setMatrixAt(i, o.matrix);}); this.bm.instanceMatrix.needsUpdate = true;
-    this.ebm.count = this.EB.length; this.EB.forEach((b, i) => {o.position.set(b.x, 0, b.z); o.rotation.set(0, 0, 0); const s = 1 + Math.sin(this.t * 20 + i) * .15; o.scale.setScalar(s); o.updateMatrix(); this.ebm.setMatrixAt(i, o.matrix);}); this.ebm.instanceMatrix.needsUpdate = true;
+    this.ebm.count = this.EB.length; this.EB.forEach((b, i) => {o.position.set(b.x, 0, b.z); o.rotation.set(0, 0, 0); const s = (b.s || 1) * (1 + Math.sin(this.t * 20 + i) * .15); o.scale.setScalar(s); o.updateMatrix(); this.ebm.setMatrixAt(i, o.matrix);}); this.ebm.instanceMatrix.needsUpdate = true;
     this.dbm.count = this.DB.length; this.DB.forEach((s, i) => {o.position.set(s.x, s.y, s.z); o.rotation.set(s.rx, s.ry, 0); o.scale.setScalar(s.s); o.updateMatrix(); this.dbm.setMatrixAt(i, o.matrix);}); this.dbm.instanceMatrix.needsUpdate = true;
     if (this.blobs) {
       let n = 0; o.rotation.set(0, 0, 0);
@@ -366,7 +390,7 @@ export class Arena {
       this.cam.look.x += (P.p.x + P.v.x * ahead - this.cam.look.x) * k; this.cam.look.z += (P.p.z + P.v.z * ahead - this.cam.look.z) * k;
       const spd = Math.hypot(P.v.x, P.v.z) / this.maxSpeed; this.kick = Math.max(0, this.kick - dtReal * 2.2);
       const ar = eng.W / eng.H, zoom = (1 + .2 * Math.min(spd, 1.3) + .22 * this.kick) * (ar < 1 ? 1.05 : 1);
-      const df = ar < 1 ? .74 : .88, H = 38 * zoom * df, Dz = 25 * zoom * df; this.vr = Math.max(24, H * Math.tan(c.fov * Math.PI / 360) * Math.max(1, ar) * .9);
+      const df = (ar < 1 ? .74 : .88) * ({near: .8, mid: 1, far: 1.22}[this.save.g3.ctrl.cam || 'mid'] || 1), H = 38 * zoom * df, Dz = 25 * zoom * df; this.vr = Math.max(24, H * Math.tan(c.fov * Math.PI / 360) * Math.max(1, ar) * .9);
        const sway = clamp(-P.v.x * .0042, -.14, .14) + Math.sin(this.t * .5) * .006;
       const cs = Math.cos(sway), sn = Math.sin(sway);
       this.shake = Math.max(0, this.shake - dtReal * 2.4); const sk = this.shake * this.shake * 1.6;
@@ -382,14 +406,31 @@ export class Arena {
 
     /* --- state / HUD --- */
     if (this.state === 'dying') {this.endT -= dtReal; if (this.endT <= 0) {this.state = 'over'; this.inp.enabled = false; this.ui.over && this.ui.over(this.summary());}}
-    this.hudT -= dtReal; if (this.hudT <= 0) {this.hudT = .1; this.ui.hud && this.ui.hud({hp: P.hp, max: P.maxHp, score: this.score, kills: this.kills, coins: Math.floor(this.coins), wave: this.wave, combo: this.combo, dash: clamp(1 - P.dashCd / 1.6, 0, 1), bombs: P.bombs});}
+    this.hudT -= dtReal; if (this.hudT <= 0) {this.hudT = .1; this.ui.hud && this.ui.hud({hp: P.hp, max: P.maxHp, score: this.score, kills: this.kills, coins: Math.floor(this.coins), wave: this.wave, combo: this.combo, dash: clamp(1 - P.dashCd / 1.6, 0, 1), bombs: P.bombs, gauge: this.gauge, od: this.odT > 0, graze: this.grazeN, boss: this.boss ? {name: this.boss.cfg.name, hp: Math.max(0, this.boss.hp / this.boss.max), armor: this.boss.parts.filter(p => p.alive && p.k === 'armor').length, phase: this.boss.phase, dying: this.boss.dying} : null});}
   }
 
+  graze(x, z, k) {
+    if (this.state !== 'play') return;
+    this.grazeN++; this.gIdle = 0; const P = this.P;
+    if (this.odT <= 0) this.gauge = Math.min(100, this.gauge + 6.5 * k * (P.dashT > 0 ? 2 : 1));
+    this.eng.particles.burst((x + P.p.x) / 2, 0, (z + P.p.z) / 2, 6, 16, .3, .9, .4, 1, 1, 2.5);
+    this.score += 2; if (navigator.vibrate && this.save.set.vib !== false && Math.random() < .3) navigator.vibrate(8);
+  }
+  updateOD(dtReal) {
+    if (this.state !== 'play') return;
+    if (this.odT > 0) {
+      this.odT -= dtReal; this.gauge = Math.max(0, this.gauge * (this.odT / (this.odT + dtReal)));
+      if (this.odT <= 0) {this.odT = 0; this.gauge = 0; this.ui.od && this.ui.od(false);}
+    } else if (this.gauge >= 100) {
+      this.odT = 3.4; this.kick = 1; this.addShake(.3); this.ui.od && this.ui.od(true); this.ui.toast && this.ui.toast('OVERDRIVE');
+      this.ring(this.P.p.x, this.P.p.z, 30, 0x56e0ff, .6, .9);
+    } else {this.gIdle += dtReal; if (this.gIdle > 4) this.gauge = Math.max(0, this.gauge - 5 * dtReal);}
+  }
   bomb() {
     const P = this.P; this.ring(P.p.x, P.p.z, 70, 0xffe08a, .8, 1); this.ring(P.p.x, P.p.z, 45, 0xffffff, .5, .8);
     this.eng.particles.burst(P.p.x, 0, P.p.z, Math.round(120 * this.q.burst), 60, 1, 1.8, 1, .85, .45, 1.6);
     this.addShake(1); this.hitStop(.1); this.EB.length = 0;
-    for (const e of this.E.slice()) if (Math.hypot(e.x - P.p.x, e.z - P.p.z) < 60) this.damageEnemy(e, 12);
+    this.blast(P.p.x, P.p.z, 62, 40, 12);
   }
-  summary() {return {score: this.score, kills: this.kills, coins: Math.floor(this.coins), wave: this.wave, time: this.t, planet: this.pIdx};}
+  summary() {return {score: this.score, kills: this.kills, coins: Math.floor(this.coins), wave: this.wave, time: this.t, planet: this.pIdx, bosses: this.bossKills, graze: this.grazeN};}
 }

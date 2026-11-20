@@ -30,6 +30,13 @@ body.play #hud{display:flex}
 #hc{text-align:center}#hr{text-align:right}
 #combo{font-size:13px;color:var(--gold);text-shadow:0 0 10px var(--gold);height:16px}
 #pauseB{pointer-events:auto;margin-top:6px;border:1px solid rgba(86,224,255,.5);background:none;color:var(--w);width:34px;height:34px;border-radius:50%;font-size:13px}
+#odb{height:4px;margin-top:5px;width:min(42vw,220px)}#odb i{background:linear-gradient(90deg,#ffb347,#ffe08a);box-shadow:0 0 10px #ffb347;transform:scaleX(0)}
+body.od #odb i{background:linear-gradient(90deg,#fff,#56e0ff);box-shadow:0 0 14px #56e0ff}
+#bossb{position:absolute;left:50%;transform:translateX(-50%);top:calc(70px + var(--st));width:min(70vw,420px);text-align:center;display:none;pointer-events:none}
+#bossb.on{display:block}.bb{width:100%!important;height:8px;margin:3px 0}.bb i{background:linear-gradient(90deg,#ff4a6a,#ffb0a0)!important;box-shadow:0 0 12px #ff4a6a!important}
+#odfx{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .25s;background:radial-gradient(circle,transparent 45%,rgba(86,224,255,.38) 100%),repeating-linear-gradient(0deg,rgba(86,224,255,.04) 0 2px,transparent 2px 5px)}
+body.od #odfx{opacity:1}
+.crow{display:flex;gap:6px;align-items:center;font-size:10px;letter-spacing:.14em;color:rgba(170,225,255,.8)}
 #toast{position:absolute;left:0;right:0;top:26%;text-align:center;font-size:22px;letter-spacing:.35em;font-weight:700;color:var(--w);text-shadow:0 0 18px var(--c);opacity:0;transition:opacity .4s;pointer-events:none}
 #toast.on{opacity:1}
 #hurt{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle,transparent 55%,rgba(255,40,60,.55));opacity:0;transition:opacity .35s}
@@ -73,10 +80,12 @@ body.menu #menu,body.over #over,body.paused #pause{display:flex}
 <div id="stR" class="zone"><div class="base"><div class="knob"></div></div></div>
 <button class="abtn" id="btnDash">DASH</button><button class="abtn" id="btnBomb">BOMB</button>
 <div id="hud">
-  <div><div class="lbl">HULL</div><div class="bar" id="hpb"><i></i></div><div class="lbl" style="margin-top:6px">WAVE <b id="hw">1</b> · KILL <b id="hk">0</b></div></div>
+  <div><div class="lbl">HULL</div><div class="bar" id="hpb"><i></i></div><div class="bar od" id="odb"><i></i></div><div class="lbl" style="margin-top:5px">WAVE <b id="hw">1</b> · KILL <b id="hk">0</b> · GRAZE <b id="hg">0</b></div></div>
   <div id="hc"><div class="lbl">SCORE</div><div class="big" id="hs">0</div><div id="combo"></div></div>
   <div id="hr"><div class="lbl">COINS</div><div class="big" id="hco" style="color:var(--gold);text-shadow:0 0 12px rgba(255,210,74,.6)">0</div><button id="pauseB">❚❚</button></div>
 </div>
+<div id="bossb"><div class="lbl" id="bn"></div><div class="bar bb" id="bbar"><i></i></div><div class="lbl" id="ba"></div></div>
+<div id="odfx"></div>
 <div id="toast"></div>
 <div id="menu" class="ov">
   <div class="top"><div><div class="logo">NOVA STRIKE<small>V26 · NEXT-GEN</small></div><div class="mig" id="mig"></div></div><div class="coins" id="mc">0</div></div>
@@ -84,7 +93,7 @@ body.menu #menu,body.over #over,body.paused #pause{display:flex}
   <div class="shipinfo"><div class="sname" id="sn"></div><div class="sperk" id="sp"></div><div class="stats" id="ss"></div><div class="hp" id="shp"></div></div>
   <div class="bot">
     <div class="row"><button class="chip" id="pPrev">◂</button><div class="pl" id="pl"></div><button class="chip" id="pNext">▸</button></div>
-    <div class="row" id="qrow"></div>
+    <div class="crow" id="crow"></div><div class="row" id="qrow"></div>
     <button class="go" id="go">LAUNCH</button>
   </div>
 </div>
