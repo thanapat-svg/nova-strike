@@ -28,7 +28,7 @@ void main(){
 }`;
 
 export class Particles {
-  constructor(scene, max) {
+  constructor(scene, max, opts = {}) {
     this.max = max; this.i = 0; this.t = 0; this.dirty0 = -1; this.dirty1 = -1; this.wrapped = false;
     const g = new THREE.BufferGeometry();
     this.pos = new Float32Array(max * 3); this.vel = new Float32Array(max * 3);
@@ -39,7 +39,7 @@ export class Particles {
     for (const a of [this.aPos, this.aVel, this.aSpn, this.aCol]) a.setUsage(THREE.DynamicDrawUsage);
     g.setAttribute('position', this.aPos); g.setAttribute('aVel', this.aVel); g.setAttribute('aSpawn', this.aSpn); g.setAttribute('aCol', this.aCol);
     this.uni = {uTime: {value: 0}, uPx: {value: 900}};
-    this.mat = new THREE.ShaderMaterial({vertexShader: VS, fragmentShader: FS, uniforms: this.uni, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending});
+    this.mat = new THREE.ShaderMaterial({vertexShader: VS, fragmentShader: opts.fs || FS, uniforms: this.uni, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending});
     this.points = new THREE.Points(g, this.mat); this.points.frustumCulled = false; this.points.renderOrder = 10;
     scene.add(this.points);
     this.live = 0;

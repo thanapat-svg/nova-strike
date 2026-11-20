@@ -26,7 +26,7 @@ function buildEngine() {
   if (arena) {arena.stop(); arena = null;}
   if (eng) {eng.dispose();}
   const old = $('c'), cv = document.createElement('canvas'); cv.id = 'c'; old.replaceWith(cv);
-  eng = new Engine(cv, qPreset());
+  eng = new Engine(cv, qPreset()); eng.auto = save.g3.q === 'auto'; eng.onDegrade = d => ui.toast(d === 1 ? 'AUTO: ลดเอฟเฟกต์ภาพบางส่วนเพื่อความลื่น' : 'AUTO: ปิดโพสต์โพรเซสเพื่อความลื่น');
   window.__nova.eng = eng;
   arena = new Arena(eng, save, input, ui);
   window.__nova.arena = arena;

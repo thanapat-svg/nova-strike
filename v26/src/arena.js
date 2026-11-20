@@ -74,7 +74,7 @@ export class Arena {
     this.cam = {look: new THREE.Vector3(), roll: 0};
     this.eng.cam.position.set(0, 40, 30); this.state = 'play';
     this.inp.reset(); this.inp.enabled = true;
-    this.tmp = new THREE.Object3D(); this.sp = new THREE.Vector3();
+    this.tmp = new THREE.Object3D(); this.sp = new THREE.Vector3(); this.sp2 = new THREE.Vector3(); this.fxH = 0; this.fxOD = 0;
     this.vr = 30; this.waveToast = 1;
     this.boss = null; this.chunks = []; this.nextBoss = 5; this.bossKills = 0; this._bossGeos = []; this._bossMats = []; this.tsHold = 0;
     this.gauge = 0; this.odT = 0; this.grazeN = 0; this.gIdle = 0; this.tsNow = 1; this.astT = 0;
@@ -105,9 +105,12 @@ export class Arena {
     pt.burst(x, 0, z, Math.round(n * .45), 38 * power, .5, 1.0, 1, .95, .8, 2.2);
     pt.spawn(x, 0, z, 0, 0, 0, .28, 9 * power, 1, 1, .9, 0);
     this.ring(x, z, 9 * power + 3, col, .55); blast(this, x, z, 9 * power + 5, 14 * power, 0);
+    if (this.eng.heat) this.eng.heat.burst(x, 0, z, 4, 10 * power, .7, 6 * power, 1, 1, 1, 1.8);
+    if (power >= 1.5) this.eng.addShock(x, z, 12 * power, .35 * power, .7);
     const nd = Math.min(q.debris * power | 0, 24);
     for (let i = 0; i < nd; i++) if (this.DB.length < 88) {const a = rnd(0, TAU), s = rnd(14, 34); this.DB.push({x, z, y: rnd(-1, 1), vx: Math.cos(a) * s, vz: Math.sin(a) * s, vy: rnd(-2, 6), rx: rnd(0, 6), ry: rnd(0, 6), sp: rnd(-9, 9), life: rnd(1.2, 2.4), s: rnd(.5, 1.2) * Math.sqrt(power)});}
   }
+  shockwave(x, z) {this.eng.addShock(x, z, 95, 1.8, 1.4);}
   hitStop(s) {this.stopT = Math.max(this.stopT, s);}
   addShake(s) {this.shake = Math.min(1.6, Math.max(this.shake, this.shake + s * .6, s));}
   nearest(x, z, maxD = 1e9) {let best = null, bd = maxD * maxD; for (const e of this.E) {const d = (e.x - x) ** 2 + (e.z - z) ** 2; if (d < bd) {bd = d; best = e;}} const B = this.boss; if (B && !B.dying) {const [cx, cz] = corePos(B), d = (cx - x) ** 2 + (cz - z) ** 2; if (d < bd) best = {x: cx, z: cz, r: B.cfg.coreR, boss: true};} return best;}
@@ -161,7 +164,7 @@ export class Arena {
   }
   hurt(d, fromX, fromZ) {
     const P = this.P; if (P.inv > 0 || this.state !== 'play') return;
-    P.hp -= d; P.inv = .85; this.addShake(.55); this.hitStop(.07); this.combo = 0;
+    P.hp -= d; P.inv = .85; this.fxH = 1; this.addShake(.55); this.hitStop(.07); this.combo = 0;
     const dx = P.p.x - fromX, dz = P.p.z - fromZ, m = Math.hypot(dx, dz) || 1; P.v.x += dx / m * 22; P.v.z += dz / m * 22;
     this.eng.particles.burst(P.p.x, 0, P.p.z, Math.round(18 * this.q.burst), 20, .5, 1.1, 1, .4, .3, 2);
     this.ui.hurt && this.ui.hurt();
@@ -201,7 +204,7 @@ export class Arena {
           const dx = mm > .15 ? mx / mm : P.h.x, dz = mm > .15 ? mz / mm : P.h.y;
           P.v.x = dx * 64; P.v.z = dz * 64; P.dashT = .26; P.inv = Math.max(P.inv, .4); P.dashCd = 1.6; this.kick = 1; this.addShake(.25);
           pt.burst(P.p.x, 0, P.p.z, Math.round(26 * this.q.burst), 18, .45, 1.1, this.flameCol.r, this.flameCol.g, this.flameCol.b, 2.5);
-          this.ring(P.p.x, P.p.z, 8, this.flameCol.getHex(), .4, .6);
+          this.ring(P.p.x, P.p.z, 8, this.flameCol.getHex(), .4, .6); eng.addShock(P.p.x, P.p.z, 16, .45, .5);
         }
       }
       if (inp.bombReq) {inp.bombReq = false; if (P.bombs > 0) {P.bombs--; this.bomb();}}
@@ -248,6 +251,7 @@ export class Arena {
         const nz = thr > .15 ? (this.q.burst >= 1 ? 2 : 1) : 0;
         for (const en of sh.engines) {
           g.localToWorld(this.sp.copy(en));
+          if (eng.heat && (this._hf = !this._hf)) eng.heat.spawn(this.sp.x, this.sp.y, this.sp.z, -P.v.x * .2 + P.h.x * -5, 0, -P.v.z * .2 + P.h.y * -5, .38, 2.6, 1, 1, 1, 2);
           for (let i = 0; i < nz; i++) pt.spawn(this.sp.x, this.sp.y, this.sp.z, -P.v.x * .25 + P.h.x * -6 + rnd(-1.6, 1.6), rnd(-.8, .8), -P.v.z * .25 + P.h.y * -6 + rnd(-1.6, 1.6), rnd(.25, .5), rnd(.5, .9), this.flameCol.r, this.flameCol.g, this.flameCol.b, 2.2);
         }
       }
@@ -399,6 +403,14 @@ export class Arena {
       this.cam.roll += ((-P.v.x * .0018) - this.cam.roll) * (1 - Math.exp(-4 * dtReal)); c.rotateZ(this.cam.roll + rnd(-sk, sk) * .01);
       this.floor.material.uniforms.uC.value.set(P.p.x, 0, P.p.z); this.floor.material.uniforms.uT.value = this.t;
       this.dust.material.uniforms.uC.value.copy(P.p); this.dust.material.uniforms.uPx.value = eng.px; this.dust.material.uniforms.uSp.value = Math.min(1, spd);
+      {
+        const f = eng.fx; this.sp.copy(P.p).project(c); f.px = this.sp.x * .5 + .5; f.py = this.sp.y * .5 + .5;
+        this.sp2.set(P.p.x + P.v.x * .05, 0, P.p.z + P.v.z * .05).project(c);
+        const vx = (this.sp2.x - this.sp.x) * .5, vy = (this.sp2.y - this.sp.y) * .5, m = Math.hypot(vx, vy) || 1, k = Math.min(1.3, spd) ** 2 * .011;
+        f.mbx = vx / m * k; f.mby = vy / m * k; f.dash = this.kick * this.kick;
+        this.fxH = Math.max(0, this.fxH - dtReal * 3); this.fxOD += ((this.odT > 0 ? 1 : 0) - this.fxOD) * (1 - Math.exp(-6 * dtReal));
+        f.hurt = this.fxH; f.od = this.fxOD; f.chroma = .0022 * Math.min(1, spd) + .012 * this.fxH + .004 * this.fxOD + .007 * this.kick;
+      }
       this.sky.position.copy(c.position); this.stars.position.copy(c.position); this.sky.material.uniforms.uT.value = this.t;
       this.eng.key.position.set(P.p.x - 30, 60, P.p.z + 25); this.eng.key.target.position.set(P.p.x, 0, P.p.z);
       if (this.eng.shadowFloor) this.eng.shadowFloor.position.set(P.p.x, -5.9, P.p.z);
@@ -427,7 +439,7 @@ export class Arena {
     } else {this.gIdle += dtReal; if (this.gIdle > 4) this.gauge = Math.max(0, this.gauge - 5 * dtReal);}
   }
   bomb() {
-    const P = this.P; this.ring(P.p.x, P.p.z, 70, 0xffe08a, .8, 1); this.ring(P.p.x, P.p.z, 45, 0xffffff, .5, .8);
+    const P = this.P; this.eng.addShock(P.p.x, P.p.z, 70, 1.2, .9); this.ring(P.p.x, P.p.z, 70, 0xffe08a, .8, 1); this.ring(P.p.x, P.p.z, 45, 0xffffff, .5, .8);
     this.eng.particles.burst(P.p.x, 0, P.p.z, Math.round(120 * this.q.burst), 60, 1, 1.8, 1, .85, .45, 1.6);
     this.addShake(1); this.hitStop(.1); this.EB.length = 0;
     this.blast(P.p.x, P.p.z, 62, 40, 12);
